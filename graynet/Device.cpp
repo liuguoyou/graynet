@@ -1,0 +1,194 @@
+#include "Device.h"
+#include "Utils.h"
+
+#include <vector>
+#ifdef USE_CUDA
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
+#include <cudnn.h>
+#endif
+
+// TODO: Make this a parameter
+static const size_t kMinimumPoolSize = 64 * 1048576;
+
+#pragma warning(disable:4146)
+#define ALIGN_TO(size, align) (((size) + (align) - 1) & -(align))
+
+/*! @private */
+class MemoryPool final {
+public:
+	MemoryPool(DeviceType device_type, Device::MemoryPoolType pool_type):
+		device_type_(device_type), pool_type_(pool_type) {
+		// Make sure there is at least one pool to simplify further processing
+		AllocateNewPool(kMinimumPoolSize);
+	}
+
+	~MemoryPool() {
+		for (const Pool &pool : pools_) {
+#ifdef USE_CUDA
+			if (device_type_ == GPU) {
+				if (pool_type_ == Device::PinnedScratchMemoryPool)
+					CUDA_CALL(cudaFreeHost(pool.start_ptr));
+				else
+					CUDA_CALL(cudaFree(pool.start_ptr));
+			}
+			else
+#endif
+				free(pool.start_ptr);
+		}
+	}
+
+	void *AllocateMemory(int size) {
+		const size_t kAlignment = 16;
+		size_t current = ALIGN_TO(pools_.back().current, kAlignment);
+		if (current + size > pools_.back().capacity) {
+			AllocateNewPool(size);
+			current = 0;
+		}
+		void *ptr = (char *)pools_.back().start_ptr + current;
+		pools_.back().current = current + size;
+		return ptr;
+	}
+
+	void Clear() {
+		for (Pool &pool : pools_)
+			pool.current = 0;
+	}
+
+private:
+	void AllocateNewPool(int minimum_size) {
+		size_t size = ALIGN_TO((size_t)minimum_size, kMinimumPoolSize);
+		Pool pool;
+#ifdef USE_CUDA
+		if (device_type_ == GPU) {
+			if (pool_type_ == Device::PinnedScratchMemoryPool)
+				CUDA_CALL(cudaHostAlloc(&pool.start_ptr, size, cudaHostAllocDefault));
+			else
+				CUDA_CALL(cudaMalloc(&pool.start_ptr, size));
+		}
+		else
+#endif
+			pool.start_ptr = malloc(size);
+		if (!pool.start_ptr)
+			__debugbreak();
+		pool.current = 0;
+		pool.capacity = size;
+		pools_.push_back(pool);
+	}
+
+	struct Pool {
+		void *start_ptr;
+		size_t current;
+		size_t capacity;
+	};
+	std::vector<Pool> pools_;
+	DeviceType device_type_;
+	Device::MemoryPoolType pool_type_;
+};
+
+/*! @private */
+class DevicePrivate {
+public:
+	DeviceType device_type_;
+#ifdef USE_CUDA
+	cublasHandle_t cublas_handle_;
+	cudnnHandle_t cudnn_handle_;
+
+	MemoryPool *pinned_scratch_memory_pool_;
+#endif
+
+	MemoryPool *permanent_memory_pool_, *scratch_memory_pool_;
+};
+
+Device::Device() : Device(GPU) {
+}
+
+Device::Device(DeviceType device_type): d(new DevicePrivate()) {
+#ifdef USE_CUDA
+	d->device_type_ = device_type;
+	if (d->device_type_ == GPU) {
+		CUDA_CALL(cudaSetDevice(0));
+		CUBLAS_CALL(cublasCreate_v2(&d->cublas_handle_));
+		CUDNN_CALL(cudnnCreate(&d->cudnn_handle_));
+	}
+	d->pinned_scratch_memory_pool_ = new MemoryPool(d->device_type_, PinnedScratchMemoryPool);
+#else
+	d->device_type_ = CPU;
+#endif
+	d->permanent_memory_pool_ = new MemoryPool(d->device_type_, PermanentMemoryPool);
+	d->scratch_memory_pool_ = new MemoryPool(d->device_type_, ScratchMemoryPool);
+
+	_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+	_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+}
+
+Device::~Device() {
+#ifdef USE_CUDA
+	if (d->device_type_ == GPU) {
+		CUBLAS_CALL(cublasDestroy_v2(d->cublas_handle_));
+		CUDNN_CALL(cudnnDestroy(d->cudnn_handle_));
+	}
+	delete d->pinned_scratch_memory_pool_;
+#endif
+	delete d->permanent_memory_pool_;
+	delete d->scratch_memory_pool_;
+	delete d;
+}
+
+DeviceType Device::GetDeviceType() const {
+	return d->device_type_;
+}
+
+#ifdef USE_CUDA
+cublasHandle_t Device::GetCuBLASHandle() const {
+	return d->cublas_handle_;
+}
+
+cudnnHandle_t Device::GetCuDNNHandle() const {
+	return d->cudnn_handle_;
+}
+#endif
+
+void *Device::AllocateMemory(int size, MemoryPoolType memory_pool) {
+	if (memory_pool == PermanentMemoryPool)
+		return d->permanent_memory_pool_->AllocateMemory(size);
+	else if (memory_pool == ScratchMemoryPool)
+		return d->scratch_memory_pool_->AllocateMemory(size);
+#ifdef USE_CUDA
+	else if (memory_pool = PinnedScratchMemoryPool)
+		return d->pinned_scratch_memory_pool_->AllocateMemory(size);
+#endif
+	else
+		abort();
+}
+
+void Device::ZeroMemory(void *ptr, int size) {
+#ifdef USE_CUDA
+	if (d->device_type_ == GPU)
+		CUDA_CALL(cudaMemsetAsync(ptr, 0, size));
+	else
+#endif
+		memset(ptr, 0, size);
+}
+
+void Device::CopyMemory(void *dst, const void *src, int size) {
+#ifdef USE_CUDA
+	if (d->device_type_ == GPU)
+		CUDA_CALL(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToDevice));
+	else
+#endif
+		memcpy(dst, src, size);
+}
+
+void Device::ClearMemoryPool(MemoryPoolType memory_pool) {
+	if (memory_pool == PermanentMemoryPool)
+		d->permanent_memory_pool_->Clear();
+	else if (memory_pool == ScratchMemoryPool)
+		d->scratch_memory_pool_->Clear();
+#ifdef USE_CUDA
+	else if (memory_pool == PinnedScratchMemoryPool)
+		d->pinned_scratch_memory_pool_->Clear();
+#endif
+	else
+		abort();
+}

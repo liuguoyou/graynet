@@ -1,0 +1,801 @@
+#include "Device.h"
+#include "Expression.h"
+#include "Expression_p.h"
+#include "Graph.h"
+#include "Node.h"
+#include "Utils.h"
+
+#include <cblas.h>
+#ifdef USE_CUDA
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
+#include <cudnn.h>
+#endif
+
+Expression::Expression() : graph_(nullptr), index_(0) {
+}
+
+Tensor Expression::Forward() const {
+	return graph_->Forward(*this);
+}
+
+void Expression::Backward() const {
+	return graph_->Backward(*this);
+}
+
+template<template<typename, DeviceType> typename NodeType, typename... TArg>
+static Expression CreateDeviceSpecificNode(Graph *graph, TArg&&... arg) {
+	Node *node;
+#ifdef USE_CUDA
+	if (graph->GetDeviceType() == GPU)
+		node = new NodeType<void, GPU>(std::forward<TArg>(arg)...);
+	else
+#endif
+		node = new NodeType<void, CPU>(std::forward<TArg>(arg)...);
+	return graph->AddNode(node);
+}
+
+class InputNode : public Node {
+public:
+	InputNode(Graph *graph, int batch_size, const Shape &shape, const float *data)
+		: Node{}, batch_size_(batch_size), shape_(shape) {
+		int size = batch_size * shape.GetSize() * sizeof(float);
+#ifdef USE_CUDA
+		if (graph->GetDeviceType() == GPU)
+			data_ = (float*)graph->GetDevice()->AllocateMemory(size, Device::PinnedScratchMemoryPool);
+		else
+#endif
+			data_ = (float*)graph->GetDevice()->AllocateMemory(size, Device::ScratchMemoryPool);
+		memcpy(data_, data, size);
+	}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		return shape_;
+	}
+
+	virtual int GetBatchSize() const {
+		return batch_size_;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		float *y_data = y->GetData();
+		int size = batch_size_ * shape_.GetSize() * sizeof(float);
+#ifdef USE_CUDA
+		if (graph->GetDeviceType() == GPU)
+			CUDA_CALL(cudaMemcpyAsync(y_data, data_, size, cudaMemcpyHostToDevice));
+		else
+#endif
+			memcpy(y_data, data_, size);
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		// empty
+	}
+
+private:
+	int batch_size_;
+	Shape shape_;
+	float *data_;
+};
+
+Expression Input(Graph *graph, const Shape &shape, const float *data) {
+	return graph->AddNode(new InputNode(graph, 1, shape, data));
+}
+
+Expression BatchInput(Graph *graph, int batch_size, const Shape &shape, const float *data) {
+	return graph->AddNode(new InputNode(graph, batch_size, shape, data));
+}
+
+template<typename ForwardFunc, typename BackwardFunc>
+class BinaryOpNode<CPU, ForwardFunc, BackwardFunc> : public Node {
+public:
+	BinaryOpNode(int lhs_node, int rhs_node) : Node{ lhs_node, rhs_node } {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		const Shape &lhs_shape = x_shapes[0];
+		const Shape &rhs_shape = x_shapes[1];
+		if (lhs_shape != rhs_shape)
+			abort();
+		return lhs_shape;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
+		int size = y->GetShape().GetSize();
+		float *y_data = y->GetData();
+		int left_batch_size = x[0]->GetBatchSize(), right_batch_size = x[1]->GetBatchSize();
+		// TODO: Simplify broadcast logic, avoid repeating code
+		if (left_batch_size == right_batch_size) {
+			size *= left_batch_size;
+			for (int i = 0; i < size; i++)
+				y_data[i] = ForwardFunc()(lhs_data[i], rhs_data[i]);
+		}
+		else if (left_batch_size == 1) {
+			// Broadcast left
+			int j = 0;
+			for (int batch_id = 0; batch_id < right_batch_size; batch_id++)
+				for (int i = 0; i < size; i++) {
+					y_data[j] = ForwardFunc()(lhs_data[i], rhs_data[j]);
+					j++;
+				}
+		}
+		else if (right_batch_size == 1) {
+			// Broadcast right
+			int j = 0;
+			for (int batch_id = 0; batch_id < left_batch_size; batch_id++)
+				for (int i = 0; i < size; i++) {
+					y_data[j] = ForwardFunc()(lhs_data[j], rhs_data[i]);
+					j++;
+				}
+		}
+		else
+			abort();
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
+		const float *y_data = y->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdL_data = dEdX[0]->GetData(), *dEdR_data = dEdX[1]->GetData();
+		int size = y->GetShape().GetSize();
+		int left_batch_size = x[0]->GetBatchSize(), right_batch_size = x[1]->GetBatchSize();
+		if (left_batch_size == right_batch_size) {
+			size *= left_batch_size;
+			for (int i = 0; i < size; i++) {
+				float dYdL, dYdR;
+				BackwardFunc()(lhs_data[i], rhs_data[i], y_data[i], &dYdL, &dYdR);
+				dEdL_data[i] += dYdL * dEdY_data[i];
+				dEdR_data[i] += dYdR * dEdY_data[i];
+			}
+		}
+		else if (left_batch_size == 1) {
+			// Broadcast left
+			int j = 0;
+			for (int batch_id = 0; batch_id < right_batch_size; batch_id++)
+				for (int i = 0; i < size; i++) {
+					float dYdL, dYdR;
+					BackwardFunc()(lhs_data[i], rhs_data[j], y_data[j], &dYdL, &dYdR);
+					dEdL_data[i] += dYdL * dEdY_data[j];
+					dEdR_data[j] += dYdR * dEdY_data[j];
+					j++;
+				}
+		}
+		else if (right_batch_size == 1) {
+			// Broadcast right
+			int j = 0;
+			for (int batch_id = 0; batch_id < left_batch_size; batch_id++)
+				for (int i = 0; i < size; i++) {
+					float dYdL, dYdR;
+					BackwardFunc()(lhs_data[j], rhs_data[i], y_data[j], &dYdL, &dYdR);
+					dEdL_data[j] += dYdL * dEdY_data[j];
+					dEdR_data[i] += dYdR * dEdY_data[j];
+					j++;
+				}
+		}
+		else
+			abort();
+	}
+};
+
+template<typename ForwardFunc, typename BackwardFunc>
+static Expression CreateBinaryOpNode(const Expression &lhs, const Expression &rhs) {
+	Graph *graph = lhs.GetGraph();
+	Node *node;
+#ifdef USE_CUDA
+	if (graph->GetDeviceType() == GPU)
+		node = new BinaryOpNode<GPU, ForwardFunc, BackwardFunc>(lhs.GetNodeIndex(), rhs.GetNodeIndex());
+	else
+#endif
+		node = new BinaryOpNode<CPU, ForwardFunc, BackwardFunc>(lhs.GetNodeIndex(), rhs.GetNodeIndex());
+	return graph->AddNode(node);
+}
+
+Expression operator+(const Expression &lhs, const Expression &rhs) {
+	Graph *graph = lhs.GetGraph();
+	return CreateBinaryOpNode<ElemAddForward, ElemAddBackward>(lhs, rhs);
+}
+
+Expression operator-(const Expression &lhs, const Expression &rhs) {
+	return CreateBinaryOpNode<ElemSubForward, ElemSubBackward>(lhs, rhs);
+}
+
+Expression ElemMul(const Expression &lhs, const Expression &rhs) {
+	return CreateBinaryOpNode<ElemMulForward, ElemMulBackward>(lhs, rhs);
+}
+
+Expression ElemDiv(const Expression &lhs, const Expression &rhs) {
+	return CreateBinaryOpNode<ElemDivForward, ElemDivBackward>(lhs, rhs);
+}
+
+template<typename ForwardFunc, typename BackwardFunc>
+class UnaryOpNode<CPU, ForwardFunc, BackwardFunc> : public Node {
+public:
+	UnaryOpNode(int node) : Node{ node } {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		return x_shapes[0];
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const float *x_data = x[0]->GetData();
+		int size = y->GetShape().GetSize() * x[0]->GetBatchSize();
+		float *y_data = y->GetData();
+		for (int i = 0; i < size; i++)
+			y_data[i] = ForwardFunc()(x_data[i]);
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *x_data = x[0]->GetData();
+		const float *y_data = y->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+		int size = y->GetShape().GetSize() * x[0]->GetBatchSize();
+		for (int i = 0; i < size; i++) {
+			float dYdX;
+			BackwardFunc()(x_data[i], y_data[i], &dYdX);
+			dEdX_data[i] += dYdX * dEdY_data[i];
+		}
+	}
+};
+
+template<typename ForwardFunc, typename BackwardFunc>
+static Expression CreateUnaryOpNode(const Expression &x) {
+	Graph *graph = x.GetGraph();
+	Node *node;
+#ifdef USE_CUDA
+	if (graph->GetDeviceType() == GPU)
+		node = new UnaryOpNode<GPU, ForwardFunc, BackwardFunc>(x.GetNodeIndex());
+	else
+#endif
+		node = new UnaryOpNode<CPU, ForwardFunc, BackwardFunc>(x.GetNodeIndex());
+	return graph->AddNode(node);
+}
+
+Expression operator-(const Expression &x) {
+	return CreateUnaryOpNode<ElemNegForward, ElemNegBackward>(x);
+}
+
+Expression Sqr(const Expression &x) {
+	return CreateUnaryOpNode<SqrForward, SqrBackward>(x);
+}
+
+Expression Cube(const Expression &x) {
+	return CreateUnaryOpNode<CubeForward, CubeBackward>(x);
+}
+
+Expression Exp(const Expression &x) {
+	return CreateUnaryOpNode<ExpForward, ExpBackward>(x);
+}
+
+Expression Sigmoid(const Expression &x) {
+	return CreateUnaryOpNode<SigmoidForward, SigmoidBackward>(x);
+}
+
+Expression Tanh(const Expression &x) {
+	return CreateUnaryOpNode<TanhForward, TanhBackward>(x);
+}
+
+Expression ReLU(const Expression &x) {
+	return CreateUnaryOpNode<ReLUForward, ReLUBackward>(x);
+}
+
+static void SGEMM(Device *device, CBLAS_TRANSPOSE transA, CBLAS_TRANSPOSE transB,
+	int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C) {
+	// Use column major
+	int lda = (transA == CblasNoTrans) ? K : M;
+	int ldb = (transB == CblasNoTrans) ? N : K;
+	int ldc = N;
+#ifdef USE_CUDA
+	if (device->GetDeviceType() == GPU) {
+		cublasOperation_t tA = (transA == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+		cublasOperation_t tB = (transB == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+		CUBLAS_CALL(cublasSgemm_v2(device->GetCuBLASHandle(), tB, tA,
+			N, M, K, &alpha, B, ldb, A, lda, &beta, C, ldc));
+	}
+	else
+#endif
+		cblas_sgemm(CblasColMajor, transB, transA,
+			N, M, K, alpha, B, ldb, A, lda, beta, C, ldc);
+}
+
+static void SGEMM(Device *device, CBLAS_TRANSPOSE transA, CBLAS_TRANSPOSE transB, CBLAS_TRANSPOSE transC,
+	int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C) {
+	if (transC == CblasNoTrans)
+		SGEMM(device, transA, transB, M, N, K, alpha, A, B, beta, C);
+	else {
+		// (A*B)^T = B^T * A^T
+		CBLAS_TRANSPOSE tA = (transA == CblasNoTrans) ? CblasTrans : CblasNoTrans;
+		CBLAS_TRANSPOSE tB = (transB == CblasNoTrans) ? CblasTrans : CblasNoTrans;
+		SGEMM(device, tB, tA, N, M, K, alpha, B, A, beta, C);
+	}
+}
+
+static void BatchSGEMM(Device *device, CBLAS_TRANSPOSE transA, CBLAS_TRANSPOSE transB,
+	int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C,
+	int batchA, int batchB, int batchC) {
+	int batch_size = (batchA > batchB) ? batchA : batchB;
+	int strideA = (batchA == 1) ? 0 : M * K;
+	int strideB = (batchB == 1) ? 0 : K * N;
+	int strideC = (batchC == 1) ? 0 : M * N;
+#ifdef USE_CUDA
+	if (device->GetDeviceType() == GPU && strideC > 0) {
+		// Use column major
+		int lda = (transA == CblasNoTrans) ? K : M;
+		int ldb = (transB == CblasNoTrans) ? N : K;
+		int ldc = N;
+		cublasOperation_t tA = (transA == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+		cublasOperation_t tB = (transB == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+		CUBLAS_CALL(cublasSgemmStridedBatched(device->GetCuBLASHandle(), tB, tA,
+			N, M, K, &alpha, B, ldb, strideB, A, lda, strideA, &beta, C, ldc, strideC, batch_size));
+	}
+	else
+#endif
+	{
+		for (int i = 0; i < batch_size; i++) {
+			SGEMM(device, transA, transB, M, N, K,
+				alpha, A + strideA * i, B + strideB * i, beta, C + strideC * i);
+		}
+	}
+}
+
+class MatMulNode : public Node {
+public:
+	MatMulNode(int lhs, int rhs) : Node{ lhs, rhs } {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		const Shape &lhs_shape = x_shapes[0], &rhs_shape = x_shapes[1];
+		if (lhs_shape.GetDimCount() > 2 || rhs_shape.GetDimCount() > 2)
+			abort();
+		if (lhs_shape.GetDimCount() == 1 && rhs_shape.GetDimCount() == 1) // Should use Dot() instead
+			abort();
+		if (lhs_shape.GetDimCount() == 1) {
+			if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0))
+				abort();
+			return Shape(rhs_shape.GetDim(1));
+		}
+		else if (rhs_shape.GetDimCount() == 1) {
+			if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0))
+				abort();
+			return Shape(lhs_shape.GetDim(0));
+		}
+		else {
+			if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0))
+				abort();
+			return Shape(lhs_shape.GetDim(0), rhs_shape.GetDim(1));
+		}
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		// y = L * R
+		const Shape &lhs_shape = x[0]->GetShape();
+		const Shape &rhs_shape = x[1]->GetShape();
+		int M = lhs_shape.GetDimCount() == 2 ? lhs_shape.GetDim(0) : 1;
+		int K = rhs_shape.GetDim(0);
+		int N = rhs_shape.GetDimCount() == 2 ? rhs_shape.GetDim(1) : 1;
+		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
+		float *y_data = y->GetData();
+		if (x[0]->GetBatchSize() == 1 && rhs_shape.GetDimCount() == 1) {
+			SGEMM(graph->GetDevice(), CblasNoTrans, CblasTrans, CblasTrans,
+				M, N * x[1]->GetBatchSize(), K, 1.f, lhs_data, rhs_data, 0.f, y_data);
+		}
+		else {
+			BatchSGEMM(graph->GetDevice(), CblasNoTrans, CblasNoTrans,
+				M, N, K,
+				1.f, lhs_data, rhs_data, 0.f, y_data,
+				x[0]->GetBatchSize(), x[1]->GetBatchSize(), y->GetBatchSize());
+		}
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const Shape &lhs_shape = x[0]->GetShape();
+		const Shape &rhs_shape = x[1]->GetShape();
+		int M = lhs_shape.GetDimCount() == 2 ? lhs_shape.GetDim(0) : 1;
+		int K = rhs_shape.GetDim(0);
+		int N = rhs_shape.GetDimCount() == 2 ? rhs_shape.GetDim(1) : 1;
+		const float *dEdY_data = dEdY->GetData();
+		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
+		float *dEdL_data = dEdX[0]->GetData(), *dEdR_data = dEdX[1]->GetData();
+		// dEdL += dEdY * R'
+		// dEdR += L' * dEdY
+		if (x[0]->GetBatchSize() == 1 && rhs_shape.GetDimCount() == 1) {
+			SGEMM(graph->GetDevice(), CblasTrans, CblasNoTrans, CblasNoTrans,
+				M, K, N * x[1]->GetBatchSize(),
+				1.f, dEdY_data, rhs_data, 1.f, dEdL_data);
+			SGEMM(graph->GetDevice(), CblasTrans, CblasTrans, CblasTrans,
+				K, N * x[1]->GetBatchSize(), M,
+				1.f, lhs_data, dEdY_data, 1.f, dEdR_data);
+		}
+		else {
+			BatchSGEMM(graph->GetDevice(), CblasNoTrans, CblasTrans,
+				M, K, N,
+				1.f, dEdY_data, rhs_data, 1.f, dEdL_data,
+				dEdY->GetBatchSize(), x[1]->GetBatchSize(), dEdX[0]->GetBatchSize());
+			BatchSGEMM(graph->GetDevice(), CblasTrans, CblasNoTrans,
+				K, N, M,
+				1.f, lhs_data, dEdY_data, 1.f, dEdR_data,
+				x[0]->GetBatchSize(), dEdY->GetBatchSize(), dEdX[1]->GetBatchSize());
+		}
+	}
+};
+
+Expression operator*(const Expression &lhs, const Expression &rhs) {
+	Graph *graph = lhs.GetGraph();
+	return graph->AddNode(new MatMulNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()));
+}
+
+class ConvolutionNode : public Node {
+public:
+	ConvolutionNode(int x, int filter, const Shape &strides, const Shape &padding):
+		Node{ x, filter }, strides_(strides), padding_(padding) {
+#ifdef USE_CUDA
+		CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc_));
+		CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc_));
+		CUDNN_CALL(cudnnCreateTensorDescriptor(&x_desc_));
+		CUDNN_CALL(cudnnCreateTensorDescriptor(&y_desc_));
+#endif
+	}
+
+	virtual ~ConvolutionNode() {
+#ifdef USE_CUDA
+		CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc_));
+		CUDNN_CALL(cudnnDestroyFilterDescriptor(filter_desc_));
+		CUDNN_CALL(cudnnDestroyTensorDescriptor(x_desc_));
+		CUDNN_CALL(cudnnDestroyTensorDescriptor(y_desc_));
+#endif
+	}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		const Shape &x_shape = x_shapes[0];
+		const Shape &filter_shape = x_shapes[1];
+		if (x_shape.GetDimCount() < 2)
+			abort();
+		int dims = x_shape.GetDimCount() - 1;
+		if (filter_shape.GetDimCount() != dims + 2)
+			abort();
+		if (strides_.GetDimCount() != dims)
+			abort();
+		int input_channels = x_shape.GetDim(0);
+		if (filter_shape.GetDim(1) != input_channels)
+			abort();
+		int output_channels = filter_shape.GetDim(0);
+
+		Shape ret_shape;
+		ret_shape.PushDim(output_channels);
+		for (int i = 0; i < dims; i++) {
+			int input_size = x_shape.GetDim(1 + i);
+			int filter_size = filter_shape.GetDim(2 + i);
+			int stride = strides_.GetDim(i);
+			int pad = padding_.GetDim(i);
+			int output_size = 1 + (input_size + pad * 2 - filter_size) / stride;
+			ret_shape.PushDim(output_size);
+		}
+		return ret_shape;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const Shape &x_shape = x[0]->GetShape();
+		const Shape &filter_shape = x[1]->GetShape();
+		const Shape &y_shape = y->GetShape();
+		const float *x_data = x[0]->GetData();
+		const float *filter_data = x[1]->GetData();
+		float *y_data = y->GetData();
+		int dims = y->GetShape().GetDimCount() - 1;
+
+		if (graph->GetDeviceType() == CPU)
+			abort();
+
+		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
+		x_dims[0] = x[1]->GetBatchSize();
+		y_dims[0] = y->GetBatchSize();
+		for (int i = 0; i < dims + 1; i++) {
+			x_dims[i + 1] = x_shape.GetDim(i);
+			y_dims[i + 1] = y_shape.GetDim(i);
+		}
+		int x_strides[CUDNN_DIM_MAX], y_strides[CUDNN_DIM_MAX];
+		x_strides[dims + 1] = 1;
+		y_strides[dims + 1] = 1;
+		for (int i = dims; i >= 0; i--) {
+			x_strides[i] = x_dims[i + 1] * x_strides[i + 1];
+			y_strides[i] = y_dims[i + 1] * y_strides[i + 1];
+		}
+
+		CUDNN_CALL(cudnnSetConvolutionNdDescriptor(conv_desc_, dims,
+			padding_.data(), strides_.data(), Shape::One(dims).data(), CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
+		CUDNN_CALL(cudnnSetFilterNdDescriptor(filter_desc_, CUDNN_DATA_FLOAT, CUDNN_TENSOR_NCHW,
+			dims + 2, filter_shape.data()));
+		CUDNN_CALL(cudnnSetTensorNdDescriptor(x_desc_, CUDNN_DATA_FLOAT,
+			dims + 2, x_dims, x_strides));
+		CUDNN_CALL(cudnnSetTensorNdDescriptor(y_desc_, CUDNN_DATA_FLOAT,
+			dims + 2, y_dims, y_strides));
+
+		// TODO: Use workspace for potential better performance
+		cudnnConvolutionFwdAlgo_t fwd_algo;
+		CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(graph->GetDevice()->GetCuDNNHandle(),
+			x_desc_, filter_desc_, conv_desc_, y_desc_, CUDNN_CONVOLUTION_FWD_NO_WORKSPACE, 0, &fwd_algo));
+
+		float alpha = 1.f, beta = 0.f;
+		CUDNN_CALL(cudnnConvolutionForward(graph->GetDevice()->GetCuDNNHandle(),
+			&alpha, x_desc_, x_data, filter_desc_, filter_data, conv_desc_,
+			fwd_algo, nullptr, 0, &beta, y_desc_, y_data));
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *x_data = x[0]->GetData();
+		const float *filter_data = x[1]->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+		float *dEdF_data = dEdX[1]->GetData();
+
+		if (graph->GetDeviceType() == CPU)
+			abort();
+
+		float alpha = 1.f, beta = 1.f;
+
+		cudnnConvolutionBwdFilterAlgo_t bwd_filter_algo;
+		CUDNN_CALL(cudnnGetConvolutionBackwardFilterAlgorithm(graph->GetDevice()->GetCuDNNHandle(),
+			x_desc_, y_desc_, conv_desc_, filter_desc_, CUDNN_CONVOLUTION_BWD_FILTER_NO_WORKSPACE,
+			0, &bwd_filter_algo));
+		CUDNN_CALL(cudnnConvolutionBackwardFilter(graph->GetDevice()->GetCuDNNHandle(),
+			&alpha, x_desc_, x_data, y_desc_, dEdY_data, conv_desc_, bwd_filter_algo, nullptr, 0,
+			&beta, filter_desc_, dEdF_data));
+
+		cudnnDataType_t dataType;
+		int nbDims;
+		int dimA[CUDNN_DIM_MAX];
+		int strideA[CUDNN_DIM_MAX];
+		CUDNN_CALL(cudnnGetTensorNdDescriptor(y_desc_, 4, &dataType, &nbDims, dimA, strideA));
+		
+		cudnnConvolutionBwdDataAlgo_t bwd_data_algo;
+		CUDNN_CALL(cudnnGetConvolutionBackwardDataAlgorithm(graph->GetDevice()->GetCuDNNHandle(),
+			filter_desc_, y_desc_, conv_desc_, x_desc_, CUDNN_CONVOLUTION_BWD_DATA_NO_WORKSPACE,
+			0, &bwd_data_algo));
+		CUDNN_CALL(cudnnConvolutionBackwardData(graph->GetDevice()->GetCuDNNHandle(),
+			&alpha, filter_desc_, filter_data, y_desc_, dEdY_data, conv_desc_, bwd_data_algo, nullptr, 0,
+			&beta, x_desc_, dEdX_data));
+	}
+
+private:
+	Shape strides_, padding_;
+	cudnnConvolutionDescriptor_t conv_desc_ = nullptr;
+	cudnnFilterDescriptor_t filter_desc_ = nullptr;
+	cudnnTensorDescriptor_t x_desc_ = nullptr, y_desc_ = nullptr;
+};
+
+Expression Convolution(const Expression &x, const Expression &filter, const Shape &strides, const Shape &padding) {
+	Graph *graph = filter.GetGraph();
+	return graph->AddNode(new ConvolutionNode(x.GetNodeIndex(), filter.GetNodeIndex(), strides, padding));
+}
+
+class PoolingNode : public Node {
+public:
+	PoolingNode(int node, const Shape &filter_size, const Shape &strides, const Shape &padding):
+		Node{ node }, filter_size_(filter_size), strides_(strides), padding_(padding) {
+	}
+
+private:
+	Shape filter_size_, strides_, padding_;
+};
+
+Expression MaxPooling(const Expression &x, const Shape &filter_size, const Shape &strides, const Shape &padding) {
+	Graph *graph = x.GetGraph();
+	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_size, strides, padding));
+}
+
+class ReshapeNode : public Node {
+public:
+	ReshapeNode(int node, const Shape &shape) : Node{ node }, shape_(shape) {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		if (x_shapes[0].GetSize() != shape_.GetSize())
+			abort();
+		return shape_;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		float *x_data = (float*)x[0]->GetData();
+		*y = Tensor(graph->GetDeviceType(), x[0]->GetBatchSize(), shape_, x_data);
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *dEdY_data = (float*)dEdY->GetData();
+		float *dEdX_data = (float*)dEdX[0]->GetData();
+		int size = dEdX[0]->GetBatchSize() * dEdX[0]->GetShape().GetSize();
+		float alpha = 1.f;
+#ifdef USE_CUDA
+		if (graph->GetDeviceType() == GPU) {
+			cublasSaxpy_v2(graph->GetDevice()->GetCuBLASHandle(), size,
+				&alpha, dEdY_data, 1, dEdX_data, 1);
+		}
+#endif
+		else
+			cblas_saxpy(size, alpha, dEdY_data, 1, dEdX_data, 1);
+	}
+
+private:
+	Shape shape_;
+	int node_;
+};
+
+Expression Reshape(const Expression &x, const Shape &shape) {
+	Graph *graph = x.GetGraph();
+	return graph->AddNode(new ReshapeNode(x.GetNodeIndex(), shape));
+}
+
+template<typename Dummy>
+class SoftmaxNode<Dummy, CPU> : public Node {
+public:
+	SoftmaxNode(int node) : Node{ node } {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		return x_shapes[0];
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		// y = exp(x_i) / sum(exp(x_i))
+		const Shape &input_shape = x[0]->GetShape();
+		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 1);
+		size *= x[0]->GetBatchSize();
+		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		// Softmax function
+		const float *x_data = x[0]->GetData();
+		float *y_data = y->GetData();
+		for (int t = 0; t < size; t++) {
+			// Calculate exp(x_i) and sum(exp(x_i))
+			float sum = 0;
+			float *cur_y = y_data;
+			for (int i = 0; i < dim_size; i++) {
+				float x_i = *x_data++;
+				float e_x_i = exp(x_i);
+				*cur_y++ = e_x_i;
+				sum += e_x_i;
+			}
+			sum = 1.f / sum;
+			// Normalize according to sum
+			for (int i = 0; i < dim_size; i++) {
+				float e_x_i = *y_data;
+				*y_data++ = e_x_i * sum;
+			}
+		}
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		// dY/dX_i = y_i*dEdy_i - y_i*sum_j{y_j*dEdy_j}
+		const Shape &input_shape = x[0]->GetShape();
+		int size = x[0]->GetShape().GetSizeRange(0, input_shape.GetDimCount() - 1);
+		size *= x[0]->GetBatchSize();
+		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		const float *y_data = y->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+		int cur = 0;
+		for (int t = 0; t < size; t++) {
+			float sum = 0;
+			for (int i = 0; i < dim_size; i++) {
+				dEdX_data[cur + i] = dEdY_data[cur + i] * y_data[cur + i];
+				sum += dEdX_data[cur + i];
+			}
+			for (int i = 0; i < dim_size; i++)
+				dEdX_data[cur + i] -= y_data[cur + i] * sum;
+			cur += dim_size;
+		}
+	}
+};
+
+Expression Softmax(const Expression &x) {
+	Graph *graph = x.GetGraph();
+	return CreateDeviceSpecificNode<SoftmaxNode>(graph, x.GetNodeIndex());
+}
+
+template<typename Dummy>
+class CrossEntropyNode<Dummy, CPU> : public Node {
+public:
+	CrossEntropyNode(Graph *graph, int node, const std::vector<int> &labels) : Node{ node }, labels_(labels) {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		Shape shape = x_shapes[0];
+		shape.SetDim(shape.GetDimCount() - 1, 1);
+		return shape;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		// y = -log(x_k)
+		const Shape &input_shape = x[0]->GetShape();
+		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
+		size *= x[0]->GetBatchSize();
+		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		// Cross entropy loss
+		const float *x_data = x[0]->GetData();
+		float *y_data = y->GetData();
+		for (int label_index = 0; label_index < size; label_index++) {
+			y_data[label_index] = -log(x_data[labels_[label_index]]);
+			x_data += dim_size;
+		}
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		// dY/dX_k = -1/X_k
+		const Shape &input_shape = x[0]->GetShape();
+		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
+		size *= x[0]->GetBatchSize();
+		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		const float *x_data = x[0]->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+		int cur = 0;
+		for (int label_index = 0; label_index < size; label_index++) {
+			int label = labels_[label_index];
+			dEdX_data[cur + label] += dEdY_data[label_index] * (-1.f / x_data[cur + label]);
+			cur += dim_size;
+		}
+	}
+
+private:
+	std::vector<int> labels_;
+};
+
+Expression CrossEntropy(const Expression &x, int size, const int *labels) {
+	Graph *graph = x.GetGraph();
+	std::vector<int> l;
+	for (int i = 0; i < size; i++)
+		l.push_back(labels[i]);
+	return CreateDeviceSpecificNode<CrossEntropyNode>(graph, graph, x.GetNodeIndex(), l);
+}
+
+template<typename Dummy>
+class ClassificationAccuracyNode<Dummy, CPU> : public Node {
+public:
+	ClassificationAccuracyNode(Graph *graph, int node, const std::vector<int> &labels) : Node{ node }, labels_(labels) {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		Shape shape = x_shapes[0];
+		shape.SetDim(shape.GetDimCount() - 1, 1);
+		return shape;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		// y = -log(x_k)
+		const Shape &input_shape = x[0]->GetShape();
+		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
+		size *= x[0]->GetBatchSize();
+		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		// Cross entropy loss
+		const float *x_data = x[0]->GetData();
+		float *y_data = y->GetData();
+		for (int label_index = 0; label_index < size; label_index++) {
+			int max_index = 0;
+			for (int i = 1; i < dim_size; i++) {
+				if (x_data[i] > x_data[max_index])
+					max_index = i;
+			}
+			if (max_index == labels_[label_index])
+				y_data[label_index] = 1.f;
+			else
+				y_data[label_index] = 0.f;
+			x_data += dim_size;
+		}
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		abort();
+	}
+
+private:
+	std::vector<int> labels_;
+};
+
+Expression ClassificationAccuracy(const Expression &x, int size, const int *labels) {
+	Graph *graph = x.GetGraph();
+	std::vector<int> l;
+	for (int i = 0; i < size; i++)
+		l.push_back(labels[i]);
+	return CreateDeviceSpecificNode<ClassificationAccuracyNode>(graph, graph, x.GetNodeIndex(), l);
+}

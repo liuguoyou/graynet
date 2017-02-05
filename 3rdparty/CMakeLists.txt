@@ -1,0 +1,6 @@
+if(${BUILD_TESTS})
+	set(BUILD_GTEST ON CACHE BOOL "")
+	set(BUILD_GMOCK OFF CACHE BOOL "")
+	set(gtest_force_shared_crt ON)
+	add_subdirectory(googletest)
+endif()

@@ -1,0 +1,12 @@
+function(add_source_groups)
+	foreach(file ${ARGN})
+		get_filename_component(path ${file} DIRECTORY)
+		if (path)
+			string(REPLACE "/" "\\" group ${path})
+			source_group(${group} FILES ${file})
+		else()
+			# Top level
+			source_group("\\" FILES ${file})
+		endif()
+	endforeach()
+endfunction()
