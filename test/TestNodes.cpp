@@ -220,3 +220,23 @@ TEST_F(NodeTest, ConvolutionSimple) {
 	x = CrossEntropy(x, 1, &label);
 	CheckGradient(x);
 }
+
+TEST_F(NodeTest, PoolingSimple) {
+	const float x_data[] = {
+		0.3f, 0.5f, -0.1f,
+		0.0f, -0.7f, 0.2f,
+		0.9f, 0.1f, 0.3f,
+	};
+	Expression x = graph.AddParameter(Shape(1, 3, 3), x_data);
+	x = MaxPooling(x, Shape(2, 2), Shape(1, 1), Shape(0, 0));
+	const float expected[] = {
+		0.5f, 0.5f,
+		0.9f, 0.3f,
+	};
+	CheckValue(x, expected);
+	x = Reshape(x, Shape(4));
+	x = Softmax(x);
+	const int label = 1;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}

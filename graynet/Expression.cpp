@@ -427,6 +427,40 @@ Expression operator*(const Expression &lhs, const Expression &rhs) {
 	return graph->AddNode(new MatMulNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()));
 }
 
+static Shape FilterForwardShape(const Shape &x_shape, const Shape &filter_shape,
+	const Shape &strides, const Shape &padding, bool is_pooling) {
+	int filter_window_offset = is_pooling ? 0 : 2;
+
+	if (x_shape.GetDimCount() < 2)
+		abort();
+	int dims = x_shape.GetDimCount() - 1;
+	if (filter_shape.GetDimCount() != filter_window_offset + dims)
+		abort();
+	if (strides.GetDimCount() != dims)
+		abort();
+	int input_channels = x_shape.GetDim(0);
+	int output_channels;
+	if (is_pooling)
+		output_channels = input_channels;
+	else {
+		if (filter_shape.GetDim(1) != input_channels)
+			abort();
+		output_channels = filter_shape.GetDim(0);
+	}
+
+	Shape ret_shape;
+	ret_shape.PushDim(output_channels);
+	for (int i = 0; i < dims; i++) {
+		int input_size = x_shape.GetDim(1 + i);
+		int filter_size = filter_shape.GetDim(filter_window_offset + i);
+		int stride = strides.GetDim(i);
+		int pad = padding.GetDim(i);
+		int output_size = 1 + (input_size + pad * 2 - filter_size) / stride;
+		ret_shape.PushDim(output_size);
+	}
+	return ret_shape;
+}
+
 class ConvolutionNode : public Node {
 public:
 	ConvolutionNode(int x, int filter, const Shape &strides, const Shape &padding):
@@ -451,29 +485,7 @@ public:
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		const Shape &x_shape = x_shapes[0];
 		const Shape &filter_shape = x_shapes[1];
-		if (x_shape.GetDimCount() < 2)
-			abort();
-		int dims = x_shape.GetDimCount() - 1;
-		if (filter_shape.GetDimCount() != dims + 2)
-			abort();
-		if (strides_.GetDimCount() != dims)
-			abort();
-		int input_channels = x_shape.GetDim(0);
-		if (filter_shape.GetDim(1) != input_channels)
-			abort();
-		int output_channels = filter_shape.GetDim(0);
-
-		Shape ret_shape;
-		ret_shape.PushDim(output_channels);
-		for (int i = 0; i < dims; i++) {
-			int input_size = x_shape.GetDim(1 + i);
-			int filter_size = filter_shape.GetDim(2 + i);
-			int stride = strides_.GetDim(i);
-			int pad = padding_.GetDim(i);
-			int output_size = 1 + (input_size + pad * 2 - filter_size) / stride;
-			ret_shape.PushDim(output_size);
-		}
-		return ret_shape;
+		return FilterForwardShape(x_shape, filter_shape, strides_, padding_, false);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -573,17 +585,82 @@ Expression Convolution(const Expression &x, const Expression &filter, const Shap
 
 class PoolingNode : public Node {
 public:
-	PoolingNode(int node, const Shape &filter_size, const Shape &strides, const Shape &padding):
-		Node{ node }, filter_size_(filter_size), strides_(strides), padding_(padding) {
+	PoolingNode(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding):
+		Node{ node }, filter_shape_(filter_shape), strides_(strides), padding_(padding) {
+		CUDNN_CALL(cudnnCreatePoolingDescriptor(&pooling_desc_));
+		CUDNN_CALL(cudnnCreateTensorDescriptor(&x_desc_));
+		CUDNN_CALL(cudnnCreateTensorDescriptor(&y_desc_));
+	}
+
+	virtual ~PoolingNode() {
+		CUDNN_CALL(cudnnDestroyPoolingDescriptor(pooling_desc_));
+		CUDNN_CALL(cudnnDestroyTensorDescriptor(x_desc_));
+		CUDNN_CALL(cudnnDestroyTensorDescriptor(y_desc_));
+	}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		const Shape &x_shape = x_shapes[0];
+		return FilterForwardShape(x_shape, filter_shape_, strides_, padding_, true);
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const Shape &x_shape = x[0]->GetShape();
+		const Shape &y_shape = y->GetShape();
+		const float *x_data = x[0]->GetData();
+		float *y_data = y->GetData();
+		int ndims = y->GetShape().GetDimCount() - 1;
+
+		if (graph->GetDeviceType() == CPU)
+			abort();
+
+		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
+		x_dims[0] = x[0]->GetBatchSize();
+		y_dims[0] = y->GetBatchSize();
+		for (int i = 0; i < ndims + 1; i++) {
+			x_dims[i + 1] = x_shape.GetDim(i);
+			y_dims[i + 1] = y_shape.GetDim(i);
+		}
+		int x_strides[CUDNN_DIM_MAX], y_strides[CUDNN_DIM_MAX];
+		x_strides[ndims + 1] = 1;
+		y_strides[ndims + 1] = 1;
+		for (int i = ndims; i >= 0; i--) {
+			x_strides[i] = x_dims[i + 1] * x_strides[i + 1];
+			y_strides[i] = y_dims[i + 1] * y_strides[i + 1];
+		}
+		CUDNN_CALL(cudnnSetPoolingNdDescriptor(pooling_desc_, CUDNN_POOLING_MAX, CUDNN_PROPAGATE_NAN,
+			ndims, filter_shape_.data(), padding_.data(), strides_.data()));
+		CUDNN_CALL(cudnnSetTensorNdDescriptor(x_desc_, CUDNN_DATA_FLOAT, ndims + 2, x_dims, x_strides));
+		CUDNN_CALL(cudnnSetTensorNdDescriptor(y_desc_, CUDNN_DATA_FLOAT, ndims + 2, y_dims, y_strides));
+		float alpha = 1.f, beta = 0.f;
+		CUDNN_CALL(cudnnPoolingForward(graph->GetDevice()->GetCuDNNHandle(), pooling_desc_,
+			&alpha, x_desc_, x_data, &beta, y_desc_, y_data));
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *x_data = x[0]->GetData();
+		const float *y_data = y->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+
+		if (graph->GetDeviceType() == CPU)
+			abort();
+		
+		float alpha = 1.f, beta = 1.f;
+		CUDNN_CALL(cudnnPoolingBackward(graph->GetDevice()->GetCuDNNHandle(), pooling_desc_,
+			&alpha, y_desc_, y_data, y_desc_, dEdY_data, x_desc_, x_data, &beta,
+			x_desc_, dEdX_data));
 	}
 
 private:
-	Shape filter_size_, strides_, padding_;
+	Shape filter_shape_, strides_, padding_;
+	cudnnPoolingDescriptor_t pooling_desc_;
+	cudnnTensorDescriptor_t x_desc_, y_desc_;
 };
 
-Expression MaxPooling(const Expression &x, const Shape &filter_size, const Shape &strides, const Shape &padding) {
+Expression MaxPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding) {
 	Graph *graph = x.GetGraph();
-	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_size, strides, padding));
+	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding));
 }
 
 class ReshapeNode : public Node {

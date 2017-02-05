@@ -83,7 +83,7 @@ Expression operator*(const Expression &lhs, const Expression &rhs);
 Expression Convolution(const Expression &x, const Expression &filter, const Shape &strides, const Shape &padding);
 
 /*! N-D Max Pooling */
-Expression MaxPooling(const Expression &x, const Shape &filter_size, const Shape &strides, const Shape &padding);
+Expression MaxPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding);
 
 /*! Reshape tensor */
 Expression Reshape(const Expression &x, const Shape &shape);
