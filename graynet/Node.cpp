@@ -1,5 +1,7 @@
 #include "Node.h"
 
+#include <cstdlib>
+
 Node::~Node() {
 }
 

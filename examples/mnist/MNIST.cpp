@@ -3,7 +3,17 @@
 #include <cstdio>
 #include <iostream>
 #include <vector>
+
+#ifdef _MSC_VER
 #include <intrin.h>
+static int ToLittleEndian(int x) {
+	return _byteswap_ulong(x);
+}
+#else
+static int ToLittleEndian(int x) {
+	return __builtin_bswap32(x);
+}
+#endif
 
 const int kWidth = 28;
 const int kHeight = 28;
@@ -12,14 +22,6 @@ struct DataPoint {
 	char data[kHeight * kWidth];
 	int label;
 };
-
-#ifndef _MSC_VER
-#error Unsupported compiler
-// TODO: Check correctness of ToLittleEndian intrinsic on other compilers
-#endif
-static int ToLittleEndian(int x) {
-	return _byteswap_ulong(x);
-}
 
 static std::vector<DataPoint> LoadMNIST(const char *image_filename, const char *label_filename) {
 	std::vector<DataPoint> ret;

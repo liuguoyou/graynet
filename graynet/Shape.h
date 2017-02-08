@@ -26,11 +26,7 @@ public:
 		return size;
 	}
 	inline int GetDimCount() const { return ndim_; }
-	inline int GetDim(int dim) const {
-		if (dim < 0 || dim >= ndim_)
-			__debugbreak();
-		return dims_[dim];
-	}
+	inline int GetDim(int dim) const { return dims_[dim]; }
 
 	inline bool operator==(const Shape &rhs) const {
 		for (int i = 0; i < kMaxTensorDim; i++)

@@ -15,7 +15,11 @@ endif()
 
 include(cmake/AddSourceGroups.cmake)
 
-add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+if(MSVC)
+	add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+else()
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++11")
+endif()
 
 option(BUILD_EXAMPLES "Build examples" ON)
 option(BUILD_TESTS "Build tests" ON)

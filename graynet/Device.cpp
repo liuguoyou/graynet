@@ -1,7 +1,11 @@
 #include "Device.h"
 #include "Utils.h"
 
+#include <cstdlib>
+#include <cstring>
 #include <vector>
+#include <pmmintrin.h>
+#include <xmmintrin.h>
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
@@ -70,7 +74,7 @@ private:
 #endif
 			pool.start_ptr = malloc(size);
 		if (!pool.start_ptr)
-			__debugbreak();
+			DEBUG_BREAK();
 		pool.current = 0;
 		pool.capacity = size;
 		pools_.push_back(pool);

@@ -16,6 +16,7 @@ enum InitMethod {
 
 class Device;
 class Node;
+class Optimizer;
 class GraphPrivate;
 /*! Computation graph object */
 class Graph {

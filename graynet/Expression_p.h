@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Node.h"
+
+#include <cmath>
 #ifdef USE_CUDA
 #include <host_defines.h>
 #else

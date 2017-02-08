@@ -6,6 +6,8 @@
 #include "Utils.h"
 
 #include <cblas.h>
+#include <cstdlib>
+#include <cstring>
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #include <cublas_v2.h>

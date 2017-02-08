@@ -1,5 +1,12 @@
 #pragma once
 
+#ifdef _MSC_VER
+#define DEBUG_BREAK()	__debugbreak()
+#else
+#include <signal.h>
+#define DEBUG_BREAK()	raise(SIGTRAP)
+#endif
+
 #ifdef USE_CUDA
 #include <cstdio>
 
@@ -8,7 +15,7 @@
 		cudaError_t cuda_status = (stmt); \
 		if (cuda_status != cudaSuccess) { \
 			fprintf(stderr, "%s failed, error: %s\n", #stmt, cudaGetErrorString(cuda_status)); \
-			__debugbreak(); \
+			DEBUG_BREAK(); \
 		} \
 	} while (0)
 
@@ -17,7 +24,7 @@
 		cublasStatus_t cublas_status = (stmt); \
 		if (cublas_status != CUBLAS_STATUS_SUCCESS) { \
 			fprintf(stderr, "%s failed, error: %s\n", #stmt, GetCuBLASErrorString((int)cublas_status)); \
-			__debugbreak(); \
+			DEBUG_BREAK(); \
 		} \
 	} while (0)
 
@@ -28,7 +35,7 @@ const char *GetCuBLASErrorString(int status);
 		cudnnStatus_t cudnn_status = (stmt); \
 		if (cudnn_status != CUDNN_STATUS_SUCCESS) { \
 			fprintf(stderr, "%s failed, error: %s\n", #stmt, cudnnGetErrorString(cudnn_status)); \
-			__debugbreak(); \
+			DEBUG_BREAK(); \
 		} \
 	} while (0)
 

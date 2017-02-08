@@ -4,7 +4,9 @@
 #include "Optimizer.h"
 #include "Utils.h"
 
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <random>
 #include <stack>
@@ -181,7 +183,7 @@ bool Graph::CheckGradient(const Expression &loss, bool verbose) {
 			float num_grad = (y2 - y1) / (epsilon * 2.f);
 			float backward_grad = gradient.GetValueFlat(i);
 			float diff = fabs(num_grad - backward_grad);
-			if (isnan(diff) || diff > threshold) {
+			if (std::isnan(diff) || diff > threshold) {
 				if (verbose) {
 					printf("Parameter %d element %d y1: %f y2: %f num: %f backward: %f diff: %f\n",
 						parameter_id, i, y1, y2, num_grad, backward_grad, diff);
