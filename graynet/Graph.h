@@ -33,13 +33,20 @@ public:
 	/*! Reset seed used for random number generation. */
 	void SetRandomSeed(int seed);
 
-	/*! Creates a new parameter tensor with given shape.
-	 * The lifetime of the allocated parameter object is the same with this computation graph.
-	 */
+	/*! Create a new parameter tensor with given shape. */
 	Expression AddParameter(const Shape &shape, InitMethod init_method = GlorotUniform);
 
-	/*! Creates a new parameter tensor from given initial values. */
+	/*! Create a new parameter tensor from given initial values. */
 	Expression AddParameter(const Shape &shape, const float *initial_values);
+
+	/*! Create or retrieve a parameter by name */
+	void DefineParameter(Expression *param, const char *name, const Shape &shape, InitMethod init_method = GlorotUniform);
+
+	/*! Push parameter scope */
+	void PushScope(const char *name);
+
+	/*! Pop parameter namespace */
+	void PopScope();
 	
 	/*! Clear intermediate nodes.
 	 * This function will clear all temporary storage. All Expression objects obtained with this
@@ -71,6 +78,9 @@ private:
 
 	/*! Init parameter with normal distribution */
 	void NormalInit(float *data, int size, float mean, float variance);
+
+	/*! Append name to scope */
+	void AppendScopeName(const char *name);
 
 	/*! Clear forward results without affecting existing nodes */
 	void ClearForwardCache();

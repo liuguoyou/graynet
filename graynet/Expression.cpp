@@ -17,6 +17,10 @@
 Expression::Expression() : graph_(nullptr), index_(0) {
 }
 
+Shape Expression::GetShape() const {
+	return graph_->GetNodeShape(index_);
+}
+
 Tensor Expression::Forward() const {
 	return graph_->Forward(*this);
 }
@@ -503,7 +507,7 @@ public:
 			abort();
 
 		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
-		x_dims[0] = x[1]->GetBatchSize();
+		x_dims[0] = x[0]->GetBatchSize();
 		y_dims[0] = y->GetBatchSize();
 		for (int i = 0; i < dims + 1; i++) {
 			x_dims[i + 1] = x_shape.GetDim(i);

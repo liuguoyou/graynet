@@ -9,8 +9,14 @@ public:
 	/*! Default constructor, constructs an invalid expression handle. */
 	Expression();
 
+	/*! Test if this object is a valid expression */
+	bool IsValid() const { return graph_ != nullptr; }
+
 	/*! Get the graph object this expression belongs to */
 	Graph *GetGraph() const { return graph_; }
+
+	/*! Get shape of this expression */
+	Shape GetShape() const;
 
 	/*! Forward compute this expression, return its value */
 	Tensor Forward() const;

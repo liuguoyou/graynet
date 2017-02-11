@@ -67,6 +67,11 @@ public:
 		dims_[ndim_++] = dim_value;
 	}
 
+	void PushDims(const Shape &dims) {
+		for (int i = 0; i < dims.GetDimCount(); i++)
+			PushDim(dims.GetDim(i));
+	}
+
 private:
 	int dims_[kMaxTensorDim];
 	int ndim_;

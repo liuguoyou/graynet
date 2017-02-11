@@ -10,12 +10,15 @@
 #include <ctime>
 #include <random>
 #include <stack>
+#include <unordered_map>
 #include <vector>
 #ifdef USE_CUDA
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cudnn.h>
 #endif
+
+static const int kMaxScopeNameLength = 255;
 
 /*! @private */
 class GraphPrivate {
@@ -37,11 +40,23 @@ public:
 	/*! Parameter gradients */
 	std::vector<Tensor> parameter_gradients_;
 
+	/*! Parameter name to id map */
+	std::unordered_map<std::string, int> parameter_names_; // TODO: Migrate to string_view as key
+
 	/*! Scratch spaces used for forward/backward calculations */
 	std::vector<Shape> input_shape_scratch_;
 
 	/*! Random generator */
 	std::mt19937 rng_;
+
+	/*! Ending index of scope names in scope_name_  */
+	std::vector<int> scope_indices_;
+
+	/*! Length of current scope name, i.e. the position of null terminator */
+	int scope_name_length_;
+
+	/*! Current parameter scope */
+	char scope_name_[kMaxScopeNameLength + 1];
 };
 
 #define PARAMETER_INDEX(index)	(-(index) - 1)
@@ -49,6 +64,8 @@ public:
 Graph::Graph(Device *device) : d(new GraphPrivate()) {
 	d->device_ = device;
 	d->rng_ = std::mt19937(clock());
+	d->scope_name_length_ = 0;
+	d->scope_name_[0] = 0;
 }
 
 Graph::~Graph() {
@@ -119,6 +136,49 @@ Expression Graph::AddParameter(const Shape &shape, const float *initial_values) 
 	d->parameter_gradients_.push_back(Tensor(GetDeviceType(), shape, parameter_gradient_data));
 	// We use negative indices to represent parameters
 	return Expression(this, -(int)d->parameters_.size());
+}
+
+void Graph::AppendScopeName(const char *name) {
+	int len = (int)strlen(name);
+	int need_dot = (d->scope_name_length_ > 0);
+	if (d->scope_name_length_ + need_dot + len >= kMaxScopeNameLength)
+		abort();
+	if (need_dot)
+		d->scope_name_[d->scope_name_length_++] = '.';
+	memcpy(d->scope_name_ + d->scope_name_length_, name, len + 1);
+	d->scope_name_length_ += len;
+}
+
+void Graph::DefineParameter(Expression *param, const char *name, const Shape &shape, InitMethod init_method) {
+	if (param->IsValid())
+		return;
+	int scope_length = d->scope_name_length_;
+	AppendScopeName(name);
+	std::string str_name(d->scope_name_);
+	std::unordered_map<std::string, int>::const_iterator iter = d->parameter_names_.find(str_name);
+	if (iter != d->parameter_names_.end())
+		*param = Expression(this, iter->second);
+	else {
+		*param = AddParameter(shape, init_method);
+		d->parameter_names_.emplace(str_name, param->GetNodeIndex());
+	}
+	d->scope_name_length_ = scope_length;
+	d->scope_name_[d->scope_name_length_] = 0;
+}
+
+void Graph::PushScope(const char *name) {
+	int len = (int)strlen(name);
+	d->scope_indices_.push_back(d->scope_name_length_);
+	AppendScopeName(name);
+}
+
+void Graph::PopScope() {
+	if (d->scope_indices_.empty())
+		abort();
+	int index = d->scope_indices_.back();
+	d->scope_name_length_ = index;
+	d->scope_name_[d->scope_name_length_] = 0;
+	d->scope_indices_.pop_back();
 }
 
 void Graph::Clear() {

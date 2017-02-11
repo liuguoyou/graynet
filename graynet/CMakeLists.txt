@@ -6,6 +6,8 @@ set(SRCS
 	Expression_p.h
 	Graph.h
 	Graph.cpp
+	Layer.h
+	Layer.cpp
 	Node.h
 	Node.cpp
 	Optimizer.h
