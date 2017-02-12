@@ -8,6 +8,8 @@ enum DeviceType {
 
 struct cublasContext;
 typedef struct cublasContext *cublasHandle_t;
+struct cusparseContext;
+typedef struct cusparseContext *cusparseHandle_t;
 struct cudnnContext;
 typedef struct cudnnContext *cudnnHandle_t;
 class DevicePrivate;
@@ -22,6 +24,7 @@ public:
 
 #ifdef USE_CUDA
 	cublasHandle_t GetCuBLASHandle() const;
+	cusparseHandle_t GetCuSPARSEHandle() const;
 	cudnnHandle_t GetCuDNNHandle() const;
 #endif
 

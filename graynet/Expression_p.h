@@ -60,6 +60,18 @@ DEFINE_FUNCTOR(ElemMulBackward, void, float lhs, float rhs, float y, float *dYdL
 DEFINE_FUNCTOR(ElemDivForward, float, float lhs, float rhs) { return lhs / rhs; }
 DEFINE_FUNCTOR(ElemDivBackward, void, float lhs, float rhs, float y, float *dYdL, float *dYdR) { *dYdL = 1.f / rhs; *dYdR = -lhs / (rhs * rhs); }
 
+DEFINE_FUNCTOR(SoftMarginForward, float, float lhs, float rhs) { return log(1 + exp(-lhs * rhs)); }
+DEFINE_FUNCTOR(SoftMarginBackward, void, float lhs, float rhs, float y, float *dYdL, float *dYdR) {
+	*dYdL = -rhs / (1 + exp(lhs * rhs));
+	*dYdR = -lhs / (1 + exp(lhs * rhs));
+}
+
+DEFINE_FUNCTOR(BinaryCrossEntropyForward, float, float lhs, float rhs) { return -rhs * log(lhs) - (1 - rhs) * log(1 - lhs); }
+DEFINE_FUNCTOR(BinaryCrossEntropyBackward, void, float lhs, float rhs, float y, float *dYdL, float *dYdR) {
+	*dYdL = (lhs - rhs) / (lhs - lhs * lhs);
+	*dYdR = log(1 - lhs) - log(lhs);
+}
+
 // Unary functors
 
 DEFINE_FUNCTOR(ElemNegForward, float, float x) { return -x; }
@@ -91,7 +103,9 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 	INSTANTIATE_BINARY(device_type, ElemAddForward, ElemAddBackward) \
 	INSTANTIATE_BINARY(device_type, ElemSubForward, ElemSubBackward) \
 	INSTANTIATE_BINARY(device_type, ElemMulForward, ElemMulBackward) \
-	INSTANTIATE_BINARY(device_type, ElemDivForward, ElemDivBackward)
+	INSTANTIATE_BINARY(device_type, ElemDivForward, ElemDivBackward) \
+	INSTANTIATE_BINARY(device_type, SoftMarginForward, SoftMarginBackward) \
+	INSTANTIATE_BINARY(device_type, BinaryCrossEntropyForward, BinaryCrossEntropyBackward)
 
 #define INSTANTIATE_UNARY(device_type, forward_func, backward_func) \
 	template class UnaryOpNode<device_type, forward_func, backward_func>;

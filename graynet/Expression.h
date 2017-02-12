@@ -45,6 +45,10 @@ Expression Input(Graph *graph, const Shape &shape, const float *data);
 /*! Batch data input */
 Expression BatchInput(Graph *graph, int batch_size, const Shape &shape, const float *data);
 
+/*! Batched sparse vector input (CSR format) */
+Expression BatchSparseVectorInput(Graph *graph, int batch_size, const Shape &shape,
+	int nonzero_count, const float *sparse_data, const int *batch_indices, const int *indices);
+
 /*! Element-wise add */
 Expression operator+(const Expression &lhs, const Expression &rhs);
 
@@ -81,6 +85,9 @@ Expression ReLU(const Expression &x);
 /*! Matrix multiplication */
 Expression operator*(const Expression &lhs, const Expression &rhs);
 
+/*! Vector dot (only sparse dot is supported for now) */
+Expression Dot(const Expression &lhs, const Expression &rhs);
+
 /*! N-D Convolution (actually cross correlation)
  * x: CHW format
  * filter shape: [output_channels, input_channels, d...]
@@ -96,6 +103,21 @@ Expression Reshape(const Expression &x, const Shape &shape);
 
 /*! Softmax function over the last dimension: y = exp(x_i) / sum(exp(x_i)) */
 Expression Softmax(const Expression &x);
+
+/*! Soft margin (logistic) loss
+ * y = ln(1 + e^-(label*x))
+ * label must be -1 or 1
+ */
+Expression SoftMargin(const Expression &x, const Expression &label);
+
+/*! Binary cross entropy loss
+ * y = -label*ln(x) - (1-label)*ln(1-x)
+ * label must be 0 or 1
+ */
+Expression BinaryCrossEntropy(const Expression &x, const Expression &label);
+
+/*! Binary classification accuracy: y = (x == label) */
+Expression BinaryClassificationAccuracy(const Expression &x, const Expression &label);
 
 /*! Cross entropy loss: y = -log(x_k) */
 Expression CrossEntropy(const Expression &x, int size, const int *labels);

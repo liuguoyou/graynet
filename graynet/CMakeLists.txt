@@ -40,6 +40,6 @@ endif()
 
 cuda_add_cublas_to_target(graynet)
 
-target_link_libraries(graynet ${BLAS_LIBRARIES} ${CUDNN_LIBRARIES})
+target_link_libraries(graynet ${BLAS_LIBRARIES} ${CUDNN_LIBRARIES} ${CUDA_cusparse_LIBRARY})
 
 target_include_directories(graynet PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)

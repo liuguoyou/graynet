@@ -12,6 +12,7 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cudnn.h>
+#include <cusparse_v2.h>
 #endif
 
 Expression::Expression() : graph_(nullptr), index_(0) {
@@ -41,18 +42,33 @@ static Expression CreateDeviceSpecificNode(Graph *graph, TArg&&... arg) {
 	return graph->AddNode(node);
 }
 
+static void *PinMemory(Device *device, const void *data, int size) {
+	void *ret;
+#ifdef USE_CUDA
+	if (device->GetDeviceType() == GPU)
+		ret = (float*)device->AllocateMemory(size, Device::PinnedScratchMemoryPool);
+	else
+#endif
+		ret = (float*)device->AllocateMemory(size, Device::ScratchMemoryPool);
+	memcpy(ret, data, size);
+	return ret;
+}
+
+static void CopyMemoryHostToDeviceAsync(Device *device, void *dst, const void *src, int size) {
+#ifdef USE_CUDA
+	if (device->GetDeviceType() == GPU)
+		CUDA_CALL(cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice));
+	else
+#endif
+		memcpy(dst, src, size);
+}
+
 class InputNode : public Node {
 public:
 	InputNode(Graph *graph, int batch_size, const Shape &shape, const float *data)
 		: Node{}, batch_size_(batch_size), shape_(shape) {
 		int size = batch_size * shape.GetSize() * sizeof(float);
-#ifdef USE_CUDA
-		if (graph->GetDeviceType() == GPU)
-			data_ = (float*)graph->GetDevice()->AllocateMemory(size, Device::PinnedScratchMemoryPool);
-		else
-#endif
-			data_ = (float*)graph->GetDevice()->AllocateMemory(size, Device::ScratchMemoryPool);
-		memcpy(data_, data, size);
+		data_ = (float *)PinMemory(graph->GetDevice(), data, size);
 	}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
@@ -66,12 +82,7 @@ public:
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		float *y_data = y->GetData();
 		int size = batch_size_ * shape_.GetSize() * sizeof(float);
-#ifdef USE_CUDA
-		if (graph->GetDeviceType() == GPU)
-			CUDA_CALL(cudaMemcpyAsync(y_data, data_, size, cudaMemcpyHostToDevice));
-		else
-#endif
-			memcpy(y_data, data_, size);
+		CopyMemoryHostToDeviceAsync(graph->GetDevice(), y_data, data_, size);
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
@@ -91,6 +102,57 @@ Expression Input(Graph *graph, const Shape &shape, const float *data) {
 
 Expression BatchInput(Graph *graph, int batch_size, const Shape &shape, const float *data) {
 	return graph->AddNode(new InputNode(graph, batch_size, shape, data));
+}
+
+class SparseInputNode : public Node {
+public:
+	SparseInputNode(Graph *graph, int batch_size, const Shape &shape, int nonzero_count,
+		const float *sparse_data, const int *batch_indices, const int *indices)
+		: Node{}, batch_size_(batch_size), shape_(shape), nonzero_count_(nonzero_count) {
+		if (shape.GetDimCount() != 1)
+			abort();
+		sparse_data_ = (float *)PinMemory(graph->GetDevice(), sparse_data, nonzero_count * sizeof(float));
+		batch_indices_ = (int *)PinMemory(graph->GetDevice(), batch_indices, (batch_size + 1) * sizeof(int));
+		indices_ = (int *)PinMemory(graph->GetDevice(), indices, nonzero_count * sizeof(int));
+	}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		return shape_;
+	}
+
+	virtual int GetBatchSize() const {
+		return batch_size_;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		Device *device = graph->GetDevice();
+		float *sparse_data = (float*)device->AllocateMemory(nonzero_count_ * sizeof(float), Device::ScratchMemoryPool);
+		int *batch_indices = (int*)device->AllocateMemory((batch_size_ + 1) * sizeof(int), Device::ScratchMemoryPool);
+		int *indices = (int*)device->AllocateMemory(nonzero_count_ * sizeof(int), Device::ScratchMemoryPool);
+		CopyMemoryHostToDeviceAsync(device, sparse_data, sparse_data_, nonzero_count_ * sizeof(float));
+		CopyMemoryHostToDeviceAsync(device, batch_indices, batch_indices_, (batch_size_ + 1) * sizeof(int));
+		CopyMemoryHostToDeviceAsync(device, indices, indices_, nonzero_count_ * sizeof(int));
+		*y = Tensor(graph->GetDeviceType(), batch_size_, shape_, nonzero_count_, sparse_data, batch_indices, indices);
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		// empty
+	}
+
+private:
+	int batch_size_;
+	Shape shape_;
+	int nonzero_count_;
+	float *sparse_data_;
+	int *batch_indices_;
+	int *indices_;
+};
+
+Expression BatchSparseVectorInput(Graph *graph, int batch_size, const Shape &shape,
+	int nonzero_count, const float *sparse_data, const int *batch_indices, const int *indices) {
+	return graph->AddNode(new SparseInputNode(graph, batch_size, shape, nonzero_count,
+		sparse_data, batch_indices, indices));
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
@@ -433,6 +495,103 @@ Expression operator*(const Expression &lhs, const Expression &rhs) {
 	return graph->AddNode(new MatMulNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()));
 }
 
+class SparseDotNode : public Node {
+public:
+	SparseDotNode(int lhs, int rhs) : Node{ lhs, rhs } {
+#ifdef USE_CUDA
+		CUSPARSE_CALL(cusparseCreateMatDescr(&mat_desc_));
+		CUSPARSE_CALL(cusparseSetMatType(mat_desc_, CUSPARSE_MATRIX_TYPE_GENERAL));
+		CUSPARSE_CALL(cusparseSetMatIndexBase(mat_desc_, CUSPARSE_INDEX_BASE_ZERO));
+#endif
+	}
+
+	virtual ~SparseDotNode() {
+#ifdef USE_CUDA
+		CUSPARSE_CALL(cusparseDestroyMatDescr(mat_desc_));
+#endif
+	}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		const Shape &lhs_shape = x_shapes[0];
+		const Shape &rhs_shape = x_shapes[1];
+		if (lhs_shape.GetDimCount() != 1 || rhs_shape.GetDimCount() != 1)
+			abort();
+		if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0))
+			abort();
+		return Shape(1);
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		if (graph->GetDeviceType() == CPU)
+			abort();
+
+		if (x[0]->IsDense() && x[1]->IsDense()) {
+			// TODO: Move this to a separate node
+			int count = x[0]->GetShape().GetSize();
+			SGEMM(graph->GetDevice(), CblasNoTrans, CblasNoTrans, CblasNoTrans,
+				1, 1, count, 1.f, x[0]->GetData(), x[1]->GetData(), 0.f, y->GetData());
+			return;
+		}
+
+		const Tensor *lhs, *rhs;
+		if (x[0]->IsDense() && x[1]->IsSparse())
+			lhs = x[1], rhs = x[0];
+		else if (x[0]->IsSparse() && x[1]->IsDense())
+			lhs = x[0], rhs = x[1];
+		else // TODO: Check should be checked in ForwardShape()
+			abort();
+
+		float alpha = 1.f, beta = 0.f;
+		CUSPARSE_CALL(cusparseScsrmv(graph->GetDevice()->GetCuSPARSEHandle(), CUSPARSE_OPERATION_NON_TRANSPOSE,
+			lhs->GetBatchSize(), lhs->GetShape().GetDim(0), lhs->GetNonZeroCount(),
+			&alpha, mat_desc_, lhs->GetSparseData(), lhs->GetSparseRowIndices(), lhs->GetSparseColumnIndices(),
+			rhs->GetData(), &beta, y->GetData()));
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		if (graph->GetDeviceType() == CPU)
+			abort();
+
+		if (x[0]->IsDense() && x[1]->IsDense()) {
+			// TODO: Move this to a separate node
+			int count = x[0]->GetShape().GetSize();
+			// dE/dL = R * dE/dY
+			// dE/dR = L * dE/dY
+			CUBLAS_CALL(cublasSetPointerMode_v2(graph->GetDevice()->GetCuBLASHandle(), CUBLAS_POINTER_MODE_DEVICE));
+			CUBLAS_CALL(cublasSaxpy_v2(graph->GetDevice()->GetCuBLASHandle(), count,
+				dEdY->GetData(), x[1]->GetData(), 1, dEdX[0]->GetData(), 1));
+			CUBLAS_CALL(cublasSaxpy_v2(graph->GetDevice()->GetCuBLASHandle(), count,
+				dEdY->GetData(), x[0]->GetData(), 1, dEdX[1]->GetData(), 1));
+			CUBLAS_CALL(cublasSetPointerMode_v2(graph->GetDevice()->GetCuBLASHandle(), CUBLAS_POINTER_MODE_HOST));
+			return;
+		}
+
+		const Tensor *lhs, *rhs;
+		if (x[0]->IsDense() && x[1]->IsSparse()) {
+			lhs = x[1], rhs = x[0];
+		}
+		else if (x[0]->IsSparse() && x[1]->IsDense()) {
+			lhs = x[0], rhs = x[1];
+		}
+		else // TODO: Check should be checked in ForwardShape()
+			abort();
+
+		// Not implemented
+		abort();
+	}
+
+private:
+#ifdef USE_CUDA
+	cusparseMatDescr_t mat_desc_;
+#endif
+};
+
+Expression Dot(const Expression &lhs, const Expression &rhs) {
+	Graph *graph = lhs.GetGraph();
+	return graph->AddNode(new SparseDotNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()));
+}
+
 static Shape FilterForwardShape(const Shape &x_shape, const Shape &filter_shape,
 	const Shape &strides, const Shape &padding, bool is_pooling) {
 	int filter_window_offset = is_pooling ? 0 : 2;
@@ -579,9 +738,11 @@ public:
 
 private:
 	Shape strides_, padding_;
+#ifdef USE_CUDA
 	cudnnConvolutionDescriptor_t conv_desc_ = nullptr;
 	cudnnFilterDescriptor_t filter_desc_ = nullptr;
 	cudnnTensorDescriptor_t x_desc_ = nullptr, y_desc_ = nullptr;
+#endif
 };
 
 Expression Convolution(const Expression &x, const Expression &filter, const Shape &strides, const Shape &padding) {
@@ -660,8 +821,10 @@ public:
 
 private:
 	Shape filter_shape_, strides_, padding_;
+#ifdef USE_CUDA
 	cudnnPoolingDescriptor_t pooling_desc_;
 	cudnnTensorDescriptor_t x_desc_, y_desc_;
+#endif
 };
 
 Expression MaxPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding) {
@@ -774,6 +937,14 @@ public:
 Expression Softmax(const Expression &x) {
 	Graph *graph = x.GetGraph();
 	return CreateDeviceSpecificNode<SoftmaxNode>(graph, x.GetNodeIndex());
+}
+
+Expression SoftMargin(const Expression &x, const Expression &label) {
+	return CreateBinaryOpNode<SoftMarginForward, SoftMarginBackward>(x, label);
+}
+
+Expression BinaryCrossEntropy(const Expression &x, const Expression &label) {
+	return CreateBinaryOpNode<BinaryCrossEntropyForward, BinaryCrossEntropyBackward>(x, label);
 }
 
 template<typename Dummy>

@@ -30,6 +30,17 @@
 
 const char *GetCuBLASErrorString(int status);
 
+#define CUSPARSE_CALL(stmt) \
+	do { \
+		cusparseStatus_t cusparse_status = (stmt); \
+		if (cusparse_status != CUSPARSE_STATUS_SUCCESS) { \
+			fprintf(stderr, "%s failed, error: %s\n", #stmt, GetCuSPARSEErrorString((int)cusparse_status)); \
+			DEBUG_BREAK(); \
+		} \
+	} while (0)
+
+const char *GetCuSPARSEErrorString(int status);
+
 #define CUDNN_CALL(stmt) \
 	do { \
 		cudnnStatus_t cudnn_status = (stmt); \

@@ -65,6 +65,34 @@ TEST_F(NodeTest, BatchInput) {
 	CheckValue(x, data);
 }
 
+TEST_F(NodeTest, SoftMargin) {
+	const float x_data[] = { 0.1f, 0.5f, 0.3f, 0.7f, 0.2f, 0.9f };
+	const float label_data[] = { -1.f, -1.f, -1.f, 1.f, 1.f, 1.f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	Expression label = graph.AddParameter(Shape(6), label_data);
+	x = SoftMargin(x, label);
+	const float expected[] = {
+		0.74439666f, 0.97407698f, 0.85435524f, 0.40318605f, 0.59813887f, 0.34115387f
+	};
+	CheckValue(x, expected);
+	x = Dot(x, x);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, BinaryCrossEntropy) {
+	const float x_data[] = { 0.1f, 0.5f, 0.3f, 0.7f, 0.2f, 0.9f };
+	const float label_data[] = { 0.f, 0.f, 0.f, 1.f, 1.f, 1.f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	Expression label = graph.AddParameter(Shape(6), label_data);
+	x = BinaryCrossEntropy(x, label);
+	const float expected[] = {
+		0.10536051f, 0.69314718f, 0.35667494f, 0.35667494f, 1.60943791f, 0.10536051f,
+	};
+	CheckValue(x, expected);
+	x = Dot(x, x);
+	CheckGradient(x);
+}
+
 TEST_F(NodeTest, CrossEntropy) {
 	const float prob[] = { 0.2f, 0.1f, 0.1f, 0.5f, 0.1f };
 	const int label = 4;
@@ -239,4 +267,49 @@ TEST_F(NodeTest, PoolingSimple) {
 	const int label = 1;
 	x = CrossEntropy(x, 1, &label);
 	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Dot) {
+	const float x_data[] = { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f };
+	const float y_data[] = { -0.1f, -0.3f, -0.7f, 0.2f, 0.3f };
+	Expression x = graph.AddParameter(Shape(5), x_data);
+	Expression y = graph.AddParameter(Shape(5), y_data);
+	Expression z = Dot(x, y);
+	const float expected[] = { -0.05f };
+	CheckValue(z, expected);
+	CheckGradient(z);
+
+	Expression z2 = Dot(x, x);
+	const float expected2[] = { 0.55f };
+	CheckValue(z2, expected2);
+	CheckGradient(z2);
+}
+
+TEST_F(NodeTest, SparseDot) {
+	/*
+	 * .1 .2  0  0  0  0
+	 *  0 .3  0 .4  0  0
+	 *  0  0 .5 .6 .7  0
+	 *  0  0  0  0  0 .8
+	 */
+	const float elems[] = {
+		0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f
+	};
+	const int batch_indices[] = {
+		0, 2, 4, 7, 8
+	};
+	const int indices[] = {
+		0, 1, 1, 3, 2, 3, 4, 5
+	};
+	const float weight_data[] = {
+		0.1f, -0.1f, 0.2f, -0.2f, 0.3f, -0.3f
+	};
+	Expression weight = graph.AddParameter(Shape(6), weight_data);
+	Expression x = BatchSparseVectorInput(&graph, 4, Shape(6), 8,
+		elems, batch_indices, indices);
+	x = Dot(x, weight);
+	const float expected[] = {
+		-0.01f, -0.11f, 0.19f, -0.24f
+	};
+	CheckValue(x, expected);
 }

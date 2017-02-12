@@ -10,6 +10,7 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cudnn.h>
+#include <cusparse_v2.h>
 #endif
 
 // TODO: Make this a parameter
@@ -96,6 +97,7 @@ public:
 	DeviceType device_type_;
 #ifdef USE_CUDA
 	cublasHandle_t cublas_handle_;
+	cusparseHandle_t cusparse_handle_;
 	cudnnHandle_t cudnn_handle_;
 
 	MemoryPool *pinned_scratch_memory_pool_;
@@ -113,6 +115,7 @@ Device::Device(DeviceType device_type): d(new DevicePrivate()) {
 	if (d->device_type_ == GPU) {
 		CUDA_CALL(cudaSetDevice(0));
 		CUBLAS_CALL(cublasCreate_v2(&d->cublas_handle_));
+		CUSPARSE_CALL(cusparseCreate(&d->cusparse_handle_));
 		CUDNN_CALL(cudnnCreate(&d->cudnn_handle_));
 	}
 	d->pinned_scratch_memory_pool_ = new MemoryPool(d->device_type_, PinnedScratchMemoryPool);
@@ -146,6 +149,10 @@ DeviceType Device::GetDeviceType() const {
 #ifdef USE_CUDA
 cublasHandle_t Device::GetCuBLASHandle() const {
 	return d->cublas_handle_;
+}
+
+cusparseHandle_t Device::GetCuSPARSEHandle() const {
+	return d->cusparse_handle_;
 }
 
 cudnnHandle_t Device::GetCuDNNHandle() const {
