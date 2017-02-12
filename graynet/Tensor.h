@@ -16,6 +16,9 @@ public:
 	Tensor(DeviceType device_type, int batch_size, const Shape &shape, int nonzero_count,
 		float *sparse_data, int *batch_indices, int *indices);
 
+	/*! Test if this tensor does not contain data. */
+	bool IsEmpty() const { return data_ == nullptr; }
+
 	/*! Test if this tensor is a dense tensor. */
 	bool IsDense() const { return !is_sparse_; }
 

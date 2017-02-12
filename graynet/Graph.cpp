@@ -291,7 +291,7 @@ Tensor Graph::Forward(const Expression &expression) {
 	std::vector<const Tensor *> x;
 	int node_id = expression.GetNodeIndex();
 	for (int i = 0; i <= node_id; i++) {
-		if (!d->outputs_[i].GetData()) {
+		if (d->outputs_[i].IsEmpty()) {
 			x.clear();
 			for (int arg_id : d->nodes_[i]->GetArguments())
 				if (arg_id < 0)

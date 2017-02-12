@@ -568,17 +568,26 @@ public:
 		}
 
 		const Tensor *lhs, *rhs;
+		Tensor *dEdL, *dEdR;
 		if (x[0]->IsDense() && x[1]->IsSparse()) {
 			lhs = x[1], rhs = x[0];
+			dEdL = dEdX[1], dEdR = dEdX[0];
 		}
 		else if (x[0]->IsSparse() && x[1]->IsDense()) {
 			lhs = x[0], rhs = x[1];
+			dEdL = dEdX[0], dEdR = dEdX[1];
 		}
 		else // TODO: Check should be checked in ForwardShape()
 			abort();
 
-		// Not implemented
-		abort();
+		// dEdL += dEdY * R'
+		// dEdR += L' * dEdY
+		float alpha = 1.f, beta = 1.f;
+		// dEdL not implemented for now.
+		CUSPARSE_CALL(cusparseScsrmv(graph->GetDevice()->GetCuSPARSEHandle(), CUSPARSE_OPERATION_TRANSPOSE,
+			lhs->GetBatchSize(), lhs->GetShape().GetDim(0), lhs->GetNonZeroCount(),
+			&alpha, mat_desc_, lhs->GetSparseData(), lhs->GetSparseRowIndices(), lhs->GetSparseColumnIndices(),
+			dEdY->GetData(), &beta, dEdR->GetData()));
 	}
 
 private:

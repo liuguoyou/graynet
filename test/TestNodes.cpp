@@ -312,4 +312,5 @@ TEST_F(NodeTest, SparseDot) {
 		-0.01f, -0.11f, 0.19f, -0.24f
 	};
 	CheckValue(x, expected);
+	CheckGradient(x);
 }
