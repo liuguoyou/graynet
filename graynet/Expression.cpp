@@ -278,6 +278,70 @@ Expression ElemDiv(const Expression &lhs, const Expression &rhs) {
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
+class BinaryLeftScalarOpNode<CPU, ForwardFunc, BackwardFunc> : public Node {
+public:
+	BinaryLeftScalarOpNode(float lhs_scalar, int rhs_node) : Node{ rhs_node }, lhs_scalar_(lhs_scalar) {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		return x_shapes[0];
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const float *rhs_data = x[0]->GetData();
+		int size = y->GetShape().GetSize() * x[0]->GetBatchSize();
+		float *y_data = y->GetData();
+		for (int i = 0; i < size; i++)
+			y_data[i] = ForwardFunc()(lhs_scalar_, rhs_data[i]);
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *rhs_data = x[0]->GetData();
+		const float *y_data = y->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdR_data = dEdX[0]->GetData();
+		int size = y->GetShape().GetSize() * x[0]->GetBatchSize();
+		for (int i = 0; i < size; i++) {
+			float dYdL, dYdR;
+			BackwardFunc()(lhs_scalar_, rhs_data[i], y_data[i], &dYdL, &dYdR);
+			dEdR_data[i] += dYdR * dEdY_data[i];
+		}
+	}
+
+private:
+	float lhs_scalar_;
+};
+
+template<typename ForwardFunc, typename BackwardFunc>
+static Expression CreateBinaryLeftScalarOpNode(float lhs_scalar, const Expression &rhs) {
+	Graph *graph = rhs.GetGraph();
+	Node *node;
+#ifdef USE_CUDA
+	if (graph->GetDeviceType() == GPU)
+		node = new BinaryLeftScalarOpNode<GPU, ForwardFunc, BackwardFunc>(lhs_scalar, rhs.GetNodeIndex());
+	else
+#endif
+		node = new BinaryLeftScalarOpNode<CPU, ForwardFunc, BackwardFunc>(lhs_scalar, rhs.GetNodeIndex());
+	return graph->AddNode(node);
+}
+
+Expression operator+(float lhs, const Expression &rhs) {
+	return CreateBinaryLeftScalarOpNode<ElemAddForward, ElemAddBackward>(lhs, rhs);
+}
+
+Expression operator-(float lhs, const Expression &rhs) {
+	return CreateBinaryLeftScalarOpNode<ElemSubForward, ElemSubBackward>(lhs, rhs);
+}
+
+Expression operator*(float lhs, const Expression &rhs) {
+	return CreateBinaryLeftScalarOpNode<ElemMulForward, ElemMulBackward>(lhs, rhs);
+}
+
+Expression operator/(float lhs, const Expression &rhs) {
+	return CreateBinaryLeftScalarOpNode<ElemDivForward, ElemDivBackward>(lhs, rhs);
+}
+
+template<typename ForwardFunc, typename BackwardFunc>
 class UnaryOpNode<CPU, ForwardFunc, BackwardFunc> : public Node {
 public:
 	UnaryOpNode(int node) : Node{ node } {}

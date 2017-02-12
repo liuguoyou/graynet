@@ -61,6 +61,18 @@ Expression ElemMul(const Expression &lhs, const Expression &rhs);
 /*! Element-wise divide */
 Expression ElemDiv(const Expression &lhs, const Expression &rhs);
 
+/*! Element-wise add */
+Expression operator+(float lhs, const Expression &rhs);
+
+/*! Element-wise subtract */
+Expression operator-(float lhs, const Expression &rhs);
+
+/*! Element-wise multiply */
+Expression operator*(float lhs, const Expression &rhs);
+
+/*! Element-wise divide */
+Expression operator/(float lhs, const Expression &rhs);
+
 /*! Element-wise negation: y = -x */
 Expression operator-(const Expression &x);
 

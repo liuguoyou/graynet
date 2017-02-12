@@ -17,6 +17,18 @@ public:
 };
 
 template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
+class BinaryLeftScalarOpNode : public Node {
+public:
+	BinaryLeftScalarOpNode(float lhs_scalar, int rhs_node);
+};
+
+template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
+class BinaryRightScalarOpNode : public Node {
+public:
+	BinaryRightScalarOpNode(int lhs_node, float rhs_scalar);
+};
+
+template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
 class UnaryOpNode : public Node {
 public:
 	UnaryOpNode(int node);
@@ -106,6 +118,15 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 	INSTANTIATE_BINARY(device_type, ElemDivForward, ElemDivBackward) \
 	INSTANTIATE_BINARY(device_type, SoftMarginForward, SoftMarginBackward) \
 	INSTANTIATE_BINARY(device_type, BinaryCrossEntropyForward, BinaryCrossEntropyBackward)
+
+#define INSTANTIATE_BINARY_LEFT_SCALAR(device_type, forward_func, backward_func) \
+	template class BinaryLeftScalarOpNode<device_type, forward_func, backward_func>;
+
+#define INSTANTIATE_BINARY_LEFT_SCALAR_OPS(device_type) \
+	INSTANTIATE_BINARY_LEFT_SCALAR(device_type, ElemAddForward, ElemAddBackward) \
+	INSTANTIATE_BINARY_LEFT_SCALAR(device_type, ElemSubForward, ElemSubBackward) \
+	INSTANTIATE_BINARY_LEFT_SCALAR(device_type, ElemMulForward, ElemMulBackward) \
+	INSTANTIATE_BINARY_LEFT_SCALAR(device_type, ElemDivForward, ElemDivBackward)
 
 #define INSTANTIATE_UNARY(device_type, forward_func, backward_func) \
 	template class UnaryOpNode<device_type, forward_func, backward_func>;
