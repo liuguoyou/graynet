@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #endif
@@ -25,6 +26,18 @@ float *Tensor::GetData() const {
 	if (is_sparse_)
 		abort();
 	return data_;
+}
+
+void Tensor::GetValue(float *value) const {
+	if (is_sparse_)
+		abort();
+	int size = batch_size_ * shape_.GetSize() * sizeof(float);
+#ifdef USE_CUDA
+	if (device_type_ == GPU)
+		CUDA_CALL(cudaMemcpy(value, data_, size, cudaMemcpyDeviceToHost));
+	else
+#endif
+		memcpy(value, data_, size);
 }
 
 float Tensor::GetValueFlat(int index) const {

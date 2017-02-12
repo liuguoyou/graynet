@@ -34,6 +34,9 @@ public:
 	/*! Get the data pointer of the tensor. */
 	float *GetData() const;
 
+	/*! Get tensor value back to provided CPU array */
+	void GetValue(float *value) const;
+
 	/*! Get value by flat index */
 	float GetValueFlat(int index) const;
 

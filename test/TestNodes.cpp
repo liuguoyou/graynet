@@ -14,10 +14,12 @@ public:
 		const float kAbsErrorAllowance = 1e-4f;
 		Tensor result = value.Forward();
 		int size = result.GetBatchSize() * result.GetShape().GetSize();
+		float *actual = new float[size];
+		result.GetValue(actual);
 		for (int i = 0; i < size; i++) {
-			float actual = result.GetValueFlat(i);
-			EXPECT_NEAR(actual, expected[i], kAbsErrorAllowance) << "Index is " << i;
+			EXPECT_NEAR(actual[i], expected[i], kAbsErrorAllowance) << "Index is " << i;
 		}
+		delete actual;
 	}
 
 	Device device;
