@@ -145,6 +145,18 @@ TEST_F(NodeTest, LeftScalarMul) {
 	CheckGradient(x);
 }
 
+TEST_F(NodeTest, RightScalarMul) {
+	const float x_data[] = { 1.f, 2.f, 3.f };
+	Expression x = graph.AddParameter(Shape(3), x_data);
+	x = x * 3.f;
+	const float expected[] = { 3.f, 6.f, 9.f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	int label = 1;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
 TEST_F(NodeTest, MatVecMul) {
 	const float x_data[] = {
 		0.5f, 1.2f, -2.7f,

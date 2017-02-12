@@ -49,29 +49,41 @@ Expression BatchInput(Graph *graph, int batch_size, const Shape &shape, const fl
 Expression BatchSparseVectorInput(Graph *graph, int batch_size, const Shape &shape,
 	int nonzero_count, const float *sparse_data, const int *batch_indices, const int *indices);
 
-/*! Element-wise add */
+/*! Element-wise addition */
 Expression operator+(const Expression &lhs, const Expression &rhs);
 
-/*! Element-wise subtract */
-Expression operator-(const Expression &lhs, const Expression &rhs);
-
-/*! Element-wise multiply */
-Expression ElemMul(const Expression &lhs, const Expression &rhs);
-
-/*! Element-wise divide */
-Expression ElemDiv(const Expression &lhs, const Expression &rhs);
-
-/*! Element-wise add */
+/*! Element-wise addition */
 Expression operator+(float lhs, const Expression &rhs);
 
-/*! Element-wise subtract */
+/*! Element-wise addition */
+Expression operator+(const Expression &lhs, float rhs);
+
+/*! Element-wise subtraction */
+Expression operator-(const Expression &lhs, const Expression &rhs);
+
+/*! Element-wise subtraction */
 Expression operator-(float lhs, const Expression &rhs);
 
-/*! Element-wise multiply */
+/*! Element-wise subtraction */
+Expression operator-(const Expression &lhs, float rhs);
+
+/*! Element-wise multiplication */
+Expression ElemMul(const Expression &lhs, const Expression &rhs);
+
+/*! Element-wise multiplication */
 Expression operator*(float lhs, const Expression &rhs);
 
-/*! Element-wise divide */
+/*! Element-wise multiplication */
+Expression operator*(const Expression &lhs, float rhs);
+
+/*! Element-wise division */
+Expression ElemDiv(const Expression &lhs, const Expression &rhs);
+
+/*! Element-wise division */
 Expression operator/(float lhs, const Expression &rhs);
+
+/*! Element-wise division */
+Expression operator/(const Expression &lhs, float rhs);
 
 /*! Element-wise negation: y = -x */
 Expression operator-(const Expression &x);

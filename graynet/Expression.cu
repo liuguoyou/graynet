@@ -230,6 +230,64 @@ private:
 };
 
 template<typename ForwardFunc>
+static __global__ void BinaryRightScalarForwardKernel(const float *lhs, float rhs, float *y, int N) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < N)
+		y[i] = ForwardFunc()(lhs[i], rhs);
+}
+
+template<typename BackwardFunc>
+static __global__ void BinaryRightScalarBackwardKernel(const float *lhs, float rhs, const float *y,
+	const float *dEdY, float *dEdL, int N) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < N) {
+		float dYdL, dYdR;
+		BackwardFunc()(lhs[i], rhs, y[i], &dYdL, &dYdR);
+		dEdL[i] = dEdY[i] * dYdL;
+	}
+}
+
+template<typename ForwardFunc, typename BackwardFunc>
+class BinaryRightScalarOpNode<GPU, ForwardFunc, BackwardFunc> : public Node {
+public:
+	BinaryRightScalarOpNode(int lhs_node, float rhs_scalar) : Node{ lhs_node }, rhs_scalar_(rhs_scalar) {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		return x_shapes[0];
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const float *lhs_data = x[0]->GetData();
+		int size = y->GetShape().GetSize() * x[0]->GetBatchSize();
+		float *y_data = y->GetData();
+
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (size + kThreadsPerBlock - 1) / kThreadsPerBlock;
+		BinaryRightScalarForwardKernel<ForwardFunc><<<blocksPerGrid, threadsPerBlock>>>(
+			lhs_data, rhs_scalar_, y_data, size);
+		CUDA_CALL(cudaGetLastError());
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *lhs_data = x[0]->GetData();
+		const float *y_data = y->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdL_data = dEdX[0]->GetData();
+		int size = y->GetShape().GetSize() * x[0]->GetBatchSize();
+
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (size + kThreadsPerBlock - 1) / kThreadsPerBlock;
+		BinaryRightScalarBackwardKernel<BackwardFunc><<<blocksPerGrid, threadsPerBlock>>>(
+			lhs_data, rhs_scalar_, y_data, dEdY_data, dEdL_data, size);
+		CUDA_CALL(cudaGetLastError());
+	}
+
+private:
+	float rhs_scalar_;
+};
+
+template<typename ForwardFunc>
 static __global__ void UnaryForwardKernel(const float *x, float *y, int N) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
 	if (i < N)
@@ -285,6 +343,7 @@ public:
 
 INSTANTIATE_BINARY_OPS(GPU)
 INSTANTIATE_BINARY_LEFT_SCALAR_OPS(GPU)
+INSTANTIATE_BINARY_RIGHT_SCALAR_OPS(GPU)
 INSTANTIATE_UNARY_OPS(GPU)
 
 template<typename Dummy>

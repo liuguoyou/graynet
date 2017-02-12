@@ -128,6 +128,15 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 	INSTANTIATE_BINARY_LEFT_SCALAR(device_type, ElemMulForward, ElemMulBackward) \
 	INSTANTIATE_BINARY_LEFT_SCALAR(device_type, ElemDivForward, ElemDivBackward)
 
+#define INSTANTIATE_BINARY_RIGHT_SCALAR(device_type, forward_func, backward_func) \
+	template class BinaryRightScalarOpNode<device_type, forward_func, backward_func>;
+
+#define INSTANTIATE_BINARY_RIGHT_SCALAR_OPS(device_type) \
+	INSTANTIATE_BINARY_RIGHT_SCALAR(device_type, ElemAddForward, ElemAddBackward) \
+	INSTANTIATE_BINARY_RIGHT_SCALAR(device_type, ElemSubForward, ElemSubBackward) \
+	INSTANTIATE_BINARY_RIGHT_SCALAR(device_type, ElemMulForward, ElemMulBackward) \
+	INSTANTIATE_BINARY_RIGHT_SCALAR(device_type, ElemDivForward, ElemDivBackward)
+
 #define INSTANTIATE_UNARY(device_type, forward_func, backward_func) \
 	template class UnaryOpNode<device_type, forward_func, backward_func>;
 
