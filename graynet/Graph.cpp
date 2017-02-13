@@ -245,8 +245,8 @@ bool Graph::CheckGradient(const Expression &loss, bool verbose) {
 			float diff = fabs(num_grad - backward_grad);
 			if (std::isnan(diff) || diff > threshold) {
 				if (verbose) {
-					printf("Parameter %d element %d y1: %f y2: %f num: %f backward: %f diff: %f\n",
-						parameter_id, i, y1, y2, num_grad, backward_grad, diff);
+					printf("Parameter %d element %d x1: %f x2: %f y1: %f y2: %f num: %f backward: %f diff: %f\n",
+						parameter_id, i, value - epsilon, value + epsilon, y1, y2, num_grad, backward_grad, diff);
 				}
 				ret = false;
 			}
@@ -341,10 +341,37 @@ void Graph::Backward(const Expression &expression) {
 			dEdE_data[i] = 1.f;
 	}
 	d->gradients_[node_id] = Tensor(GetDeviceType(), batch_size, shape, dEdE_data);
-	// Backward propagation
+	// Back propagation
+	// First do a depth first traversal, to determine degree for each node,
+	// to omit unnecessary edges for calculating the loss.
+	std::vector<int> degrees(d->nodes_.size());
+	std::stack<int, std::vector<int>> stack;
+	stack.push(node_id);
+	while (!stack.empty()) {
+		int i = stack.top();
+		stack.pop();
+		for (int arg_id : d->nodes_[i]->GetArguments())
+			if (arg_id >= 0) {
+				if (degrees[arg_id] == 0) {
+					// Zero gradient for this node
+					int batch_size = d->gradients_[arg_id].GetBatchSize();
+					const Shape &shape = d->gradients_[arg_id].GetShape();
+					int size = batch_size * shape.GetSize() * sizeof(float);
+					float *data = d->gradients_[arg_id].GetData();
+					if (data == nullptr) {
+						data = (float *)d->device_->AllocateMemory(size, Device::ScratchMemoryPool);
+						d->gradients_[arg_id] = Tensor(GetDeviceType(), batch_size, shape, data);
+					}
+					d->device_->ZeroMemory(data, size);
+				}
+				degrees[arg_id]++;
+				stack.push(arg_id);
+			}
+	}
+	// Temporary parameter storage for Backward() call
 	std::vector<const Tensor *> x;
 	std::vector<Tensor *> dEdX;
-	std::stack<int, std::vector<int>> stack;
+	// No do backward propagation in topology order
 	stack.push(node_id);
 	while (!stack.empty()) {
 		int i = stack.top();
@@ -357,16 +384,9 @@ void Graph::Backward(const Expression &expression) {
 				dEdX.push_back(&d->parameter_gradients_[PARAMETER_INDEX(arg_id)]);
 			}
 			else {
-				stack.push(arg_id);
+				if (--degrees[arg_id] == 0)
+					stack.push(arg_id);
 				x.push_back(&d->outputs_[arg_id]);
-				if (d->gradients_[arg_id].GetData() == nullptr) {
-					int batch_size = d->gradients_[arg_id].GetBatchSize();
-					const Shape &shape = d->gradients_[arg_id].GetShape();
-					int size = shape.GetSize();
-					float *data = (float *)d->device_->AllocateMemory(batch_size * size * sizeof(float), Device::ScratchMemoryPool);
-					d->device_->ZeroMemory(data, batch_size * size * sizeof(float));
-					d->gradients_[arg_id] = Tensor(GetDeviceType(), batch_size, shape, data);
-				}
 				dEdX.push_back(&d->gradients_[arg_id]);
 			}
 		const Tensor *y = &d->outputs_[i];
