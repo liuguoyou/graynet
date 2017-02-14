@@ -5,6 +5,7 @@
 #include "Node.h"
 #include "Utils.h"
 
+#include <type_traits>
 #include <cudnn.h>
 
 static const int kThreadsPerBlock = 128;
@@ -128,6 +129,10 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
+			abort();
+		}
+
 		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();
@@ -212,6 +217,10 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
+			abort();
+		}
+
 		const float *rhs_data = x[0]->GetData();
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();
@@ -270,6 +279,10 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
+			abort();
+		}
+
 		const float *lhs_data = x[0]->GetData();
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();

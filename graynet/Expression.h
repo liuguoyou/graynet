@@ -140,7 +140,7 @@ Expression SoftMargin(const Expression &x, const Expression &label);
  */
 Expression BinaryCrossEntropy(const Expression &x, const Expression &label);
 
-/*! Binary classification accuracy: y = (x == label) */
+/*! Binary classification accuracy: y = (x > 0.5 == label > 0.5) */
 Expression BinaryClassificationAccuracy(const Expression &x, const Expression &label);
 
 /*! Cross entropy loss: y = -log(x_k) */

@@ -60,6 +60,10 @@ public:
 
 // Binary functors
 
+struct BinaryNoBackward {
+	inline __host__ __device__ void operator()(float lhs, float rhs, float y, float *dYdL, float *dYdR) {}
+};
+
 DEFINE_FUNCTOR(ElemAddForward, float, float lhs, float rhs) { return lhs + rhs; }
 DEFINE_FUNCTOR(ElemAddBackward, void, float lhs, float rhs, float y, float *dYdL, float *dYdR) { *dYdL = *dYdR = 1; }
 
@@ -83,6 +87,8 @@ DEFINE_FUNCTOR(BinaryCrossEntropyBackward, void, float lhs, float rhs, float y, 
 	*dYdL = (lhs - rhs) / (lhs - lhs * lhs);
 	*dYdR = log(1 - lhs) - log(lhs);
 }
+
+DEFINE_FUNCTOR(BinaryClassificationAccuracyForward, float, float lhs, float rhs) { return (lhs > 0.5f) == (rhs > 0.5f); }
 
 // Unary functors
 
@@ -117,7 +123,8 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 	INSTANTIATE_BINARY(device_type, ElemMulForward, ElemMulBackward) \
 	INSTANTIATE_BINARY(device_type, ElemDivForward, ElemDivBackward) \
 	INSTANTIATE_BINARY(device_type, SoftMarginForward, SoftMarginBackward) \
-	INSTANTIATE_BINARY(device_type, BinaryCrossEntropyForward, BinaryCrossEntropyBackward)
+	INSTANTIATE_BINARY(device_type, BinaryCrossEntropyForward, BinaryCrossEntropyBackward) \
+	INSTANTIATE_BINARY(device_type, BinaryClassificationAccuracyForward, BinaryNoBackward)
 
 #define INSTANTIATE_BINARY_LEFT_SCALAR(device_type, forward_func, backward_func) \
 	template class BinaryLeftScalarOpNode<device_type, forward_func, backward_func>;

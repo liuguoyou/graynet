@@ -95,6 +95,16 @@ TEST_F(NodeTest, BinaryCrossEntropy) {
 	CheckGradient(x);
 }
 
+TEST_F(NodeTest, BinaryClassificationAccuracy) {
+	const float x_data[] = { 0.1f, 0.3f, 0.7f, 0.2f, 0.9f, 0.4f };
+	const float label_data[] = { 0.f, 0.f, 1.f, 1.f, 0.f, 0.f };
+	Expression x = BatchInput(&graph, 6, Shape(1), x_data);
+	Expression label = BatchInput(&graph, 6, Shape(1), label_data);
+	x = BinaryClassificationAccuracy(x, label);
+	const float expected[] = { 1.f, 1.f, 1.f, 0.f, 0.f, 1.f };
+	CheckValue(x, expected);
+}
+
 TEST_F(NodeTest, CrossEntropy) {
 	const float prob[] = { 0.2f, 0.1f, 0.1f, 0.5f, 0.1f };
 	const int label = 4;

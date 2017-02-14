@@ -8,6 +8,7 @@
 #include <cblas.h>
 #include <cstdlib>
 #include <cstring>
+#include <type_traits>
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
@@ -207,6 +208,10 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
+			abort();
+		}
+
 		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();
@@ -300,6 +305,10 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
+			abort();
+		}
+
 		const float *rhs_data = x[0]->GetData();
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();
@@ -364,6 +373,10 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
+			abort();
+		}
+
 		const float *lhs_data = x[0]->GetData();
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();
@@ -1105,6 +1118,10 @@ Expression SoftMargin(const Expression &x, const Expression &label) {
 
 Expression BinaryCrossEntropy(const Expression &x, const Expression &label) {
 	return CreateBinaryOpNode<BinaryCrossEntropyForward, BinaryCrossEntropyBackward>(x, label);
+}
+
+Expression BinaryClassificationAccuracy(const Expression &x, const Expression &label) {
+	return CreateBinaryOpNode<BinaryClassificationAccuracyForward, BinaryNoBackward>(x, label);
 }
 
 template<typename Dummy>
