@@ -129,6 +129,10 @@ SGDOptimizer::SGDOptimizer(Graph *graph, float learning_rate)
 	: Optimizer(graph), learning_rate_(learning_rate) {
 }
 
+void SGDOptimizer::UpdateLearningRate(float learning_rate) {
+	learning_rate_ = learning_rate;
+}
+
 void SGDOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
 	const std::vector<Tensor> &gradients,
 	const std::vector<Tensor> &extras) const {

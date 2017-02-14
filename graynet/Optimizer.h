@@ -40,6 +40,8 @@ class SGDOptimizer: public Optimizer {
 public:
 	SGDOptimizer(Graph *graph, float learning_rate);
 
+	void UpdateLearningRate(float learning_rate);
+
 protected:
 	virtual void UpdateCallback(const std::vector<Tensor> &parameters,
 		const std::vector<Tensor> &gradients,
