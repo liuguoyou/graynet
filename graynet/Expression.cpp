@@ -116,6 +116,10 @@ public:
 		indices_ = (int *)PinMemory(graph->GetDevice(), indices, nonzero_count * sizeof(int));
 	}
 
+	virtual int GetFlags() const override {
+		return NoAllocateForwardOutput;
+	}
+
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		return shape_;
 	}
@@ -623,6 +627,18 @@ Expression operator*(const Expression &lhs, const Expression &rhs) {
 	return graph->AddNode(new MatMulNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()));
 }
 
+// TODO: Move to more appropriate position
+static void AllocateClearTensor(Graph *graph, Tensor *tensor) {
+	if (tensor->GetData() == nullptr) {
+		int batch_size = tensor->GetBatchSize();
+		Shape shape = tensor->GetShape();
+		int size = batch_size * shape.GetSize() * sizeof(float);
+		float *data = (float*)graph->GetDevice()->AllocateMemory(size, Device::ScratchMemoryPool);
+		graph->GetDevice()->ZeroMemory(data, size);
+		*tensor = Tensor(graph->GetDeviceType(), batch_size, shape, data);
+	}
+}
+
 class SparseDotNode : public Node {
 public:
 	SparseDotNode(int lhs, int rhs) : Node{ lhs, rhs } {
@@ -637,6 +653,10 @@ public:
 #ifdef USE_CUDA
 		CUSPARSE_CALL(cusparseDestroyMatDescr(mat_desc_));
 #endif
+	}
+
+	virtual int GetFlags() const override {
+		return NoAllocateBackwardOutput;
 	}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
@@ -684,6 +704,8 @@ public:
 		if (x[0]->IsDense() && x[1]->IsDense()) {
 			// TODO: Move this to a separate node
 			int count = x[0]->GetShape().GetSize();
+			AllocateClearTensor(graph, dEdX[0]);
+			AllocateClearTensor(graph, dEdX[1]);
 			// dE/dL = R * dE/dY
 			// dE/dR = L * dE/dY
 			CUBLAS_CALL(cublasSetPointerMode_v2(graph->GetDevice()->GetCuBLASHandle(), CUBLAS_POINTER_MODE_DEVICE));
@@ -707,7 +729,8 @@ public:
 		}
 		else // TODO: Check should be checked in ForwardShape()
 			abort();
-
+		
+		AllocateClearTensor(graph, dEdR);
 		// dEdL += dEdY * R'
 		// dEdR += L' * dEdY
 		float alpha = 1.f, beta = 1.f;

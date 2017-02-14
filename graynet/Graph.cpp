@@ -298,11 +298,13 @@ Tensor Graph::Forward(const Expression &expression) {
 					x.push_back(&d->parameters_[PARAMETER_INDEX(arg_id)]);
 				else
 					x.push_back(&d->outputs_[arg_id]);
-			int batch_size = d->outputs_[i].GetBatchSize();
-			const Shape &shape = d->outputs_[i].GetShape();
-			int size = batch_size * shape.GetSize() * sizeof(float);
-			float *output_data = (float*)d->device_->AllocateMemory(size, Device::ScratchMemoryPool);
-			d->outputs_[i] = Tensor(GetDeviceType(), batch_size, shape, output_data);
+			if (!(d->nodes_[i]->GetFlags() & Node::NoAllocateForwardOutput)) {
+				int batch_size = d->outputs_[i].GetBatchSize();
+				Shape shape = d->outputs_[i].GetShape();
+				int size = batch_size * shape.GetSize() * sizeof(float);
+				float *output_data = (float*)d->device_->AllocateMemory(size, Device::ScratchMemoryPool);
+				d->outputs_[i] = Tensor(GetDeviceType(), batch_size, shape, output_data);
+			}
 			d->nodes_[i]->Forward(this, x, &d->outputs_[i]);
 		}
 	}
@@ -353,16 +355,21 @@ void Graph::Backward(const Expression &expression) {
 		for (int arg_id : d->nodes_[i]->GetArguments())
 			if (arg_id >= 0) {
 				if (degrees[arg_id] == 0) {
-					// Zero gradient for this node
-					int batch_size = d->gradients_[arg_id].GetBatchSize();
-					const Shape &shape = d->gradients_[arg_id].GetShape();
-					int size = batch_size * shape.GetSize() * sizeof(float);
-					float *data = d->gradients_[arg_id].GetData();
-					if (data == nullptr) {
-						data = (float *)d->device_->AllocateMemory(size, Device::ScratchMemoryPool);
-						d->gradients_[arg_id] = Tensor(GetDeviceType(), batch_size, shape, data);
+					// FIXME: This is only correct for SparseDotNot
+					// For other nodes, we should at least zero the gradient tensor
+					// We should probably move ZeroMemory() to tensor and support sparse tensors with ti.
+					if (!(d->nodes_[i]->GetFlags() & Node::NoAllocateBackwardOutput)) {
+						// Zero gradient for this node
+						int batch_size = d->gradients_[arg_id].GetBatchSize();
+						Shape shape = d->gradients_[arg_id].GetShape();
+						int size = batch_size * shape.GetSize() * sizeof(float);
+						float *data = d->gradients_[arg_id].GetData();
+						if (data == nullptr) {
+							data = (float *)d->device_->AllocateMemory(size, Device::ScratchMemoryPool);
+							d->gradients_[arg_id] = Tensor(GetDeviceType(), batch_size, shape, data);
+						}
+						d->device_->ZeroMemory(data, size);
 					}
-					d->device_->ZeroMemory(data, size);
 				}
 				degrees[arg_id]++;
 				stack.push(arg_id);

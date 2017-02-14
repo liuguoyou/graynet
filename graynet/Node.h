@@ -10,6 +10,12 @@
 /*! @private */
 class Node {
 public:
+	enum NodeFlags {
+		NoFlag = 0,
+		NoAllocateForwardOutput = 1,
+		NoAllocateBackwardOutput = 2,
+	};
+
 	/*! Constructor */
 	Node(std::initializer_list<int> args) : args_(args) {}
 
@@ -21,6 +27,9 @@ public:
 
 	/*! Get batch size, only used when GetArguments() == 0. */
 	virtual int GetBatchSize() const;
+
+	/*! Get flags for the node. Returns NoFlag by default. */
+	virtual int GetFlags() const;
 
 	/*! Do forward computation */
 	virtual void Forward(Graph *grpah, const std::vector<const Tensor *> &x, Tensor *y) const;

@@ -13,6 +13,10 @@ int Node::GetBatchSize() const {
 	abort();
 }
 
+int Node::GetFlags() const {
+	return 0;
+}
+
 void Node::Forward(Graph *grpah, const std::vector<const Tensor *> &x, Tensor *y) const {
 	abort();
 }
