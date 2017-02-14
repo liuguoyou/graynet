@@ -5,19 +5,133 @@
 #include <cblas.h>
 #ifdef USE_CUDA
 #include <cublas_v2.h>
+#include <host_defines.h>
+#else
+#define __device__
+#define __host__
 #endif
 
-Optimizer::Optimizer(Graph *graph) : graph_(graph) {}
+static const int kThreadsPerBlock = 128;
+
+// Helpers for doing tensor arithmetic
+// TODO: Better organize these functions
+static void saxpy(Device *device, int count, float alpha, const float *from, float *to) {
+#ifdef USE_CUDA
+	if (device->GetDeviceType() == GPU) {
+		CUBLAS_CALL(cublasSaxpy_v2(device->GetCuBLASHandle(),
+			count, &alpha, from, 1, to, 1));
+	}
+	else
+#endif
+		cblas_saxpy(count, alpha, from, 1, to, 1);
+}
+
+// TODO: Use CUB for better performance
+template<typename TransformFunc>
+static __global__ void TransformKernel2(int N, const float *from1, const float *from2,
+	float *to, TransformFunc func) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < N) {
+		to[i] = func(from1[i], from2[i]);
+	}
+}
+
+template<typename TransformFunc>
+static void Transform2(Device *device, int N, const float *from1, const float *from2,
+	float *to, TransformFunc func) {
+#ifdef USE_CUDA
+	if (device->GetDeviceType() == GPU) {
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+		TransformKernel2<<<blocksPerGrid, threadsPerBlock>>>(N, from1, from2, to, func);
+	}
+	else
+#endif
+	{
+		for (int i = 0; i < N; i++)
+			to[i] = func(from1[i], from2[i]);
+	}
+}
+
+// TODO: Use CUB for better performance
+template<typename TransformFunc>
+static __global__ void TransformKernel3(int N, const float *from1, const float *from2,
+	const float *from3, float *to, TransformFunc func) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < N) {
+		to[i] = func(from1[i], from2[i], from3[i]);
+	}
+}
+
+template<typename TransformFunc>
+static void Transform3(Device *device, int N, const float *from1, const float *from2,
+	const float *from3, float *to, TransformFunc func) {
+#ifdef USE_CUDA
+	if (device->GetDeviceType() == GPU) {
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+		TransformKernel3<<<blocksPerGrid, threadsPerBlock>>>(N, from1, from2, from3, to, func);
+	}
+	else
+#endif
+	{
+		for (int i = 0; i < N; i++)
+			to[i] = func(from1[i], from2[i], from3[i]);
+	}
+}
+
+class OptimizerPrivate {
+public:
+	Graph *graph_;
+
+	std::vector<Tensor> extras_;
+};
+
+Optimizer::Optimizer(Graph *graph) : d(new OptimizerPrivate()) {
+	d->graph_ = graph;
+}
+
+Optimizer::~Optimizer() {
+	delete d;
+}
+
+Graph * Optimizer::GetGraph() const {
+	return d->graph_;
+}
 
 void Optimizer::Update() {
-	graph_->OptimizerUpdate(this);
+	d->graph_->OptimizerUpdate(this);
+}
+
+int Optimizer::GetExtraDataCount() const {
+	return 0;
+}
+
+void Optimizer::UpdateCallback(const std::vector<Tensor> &parameters,
+	const std::vector<Tensor> &gradients) {
+	int extras_count = GetExtraDataCount();
+	if (extras_count > 0) {
+		for (size_t i = d->extras_.size(); i < parameters.size(); i++) {
+			int batch_size = parameters[i].GetBatchSize();
+			const Shape &shape = parameters[i].GetShape();
+			int size = batch_size * shape.GetSize() * sizeof(float);
+			Device *device = d->graph_->GetDevice();
+
+			float *data = (float *)device->AllocateMemory(size, Device::PermanentMemoryPool);
+			device->ZeroMemory(data, size);
+			d->extras_.emplace_back(device->GetDeviceType(), batch_size, shape, data);
+		}
+	}
+	UpdateCallback(parameters, gradients, d->extras_);
 }
 
 SGDOptimizer::SGDOptimizer(Graph *graph, float learning_rate)
 	: Optimizer(graph), learning_rate_(learning_rate) {
 }
 
-void SGDOptimizer::UpdateCallback(const std::vector<Tensor> &parameters, const std::vector<Tensor> &gradients) const {
+void SGDOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
+	const std::vector<Tensor> &gradients,
+	const std::vector<Tensor> &extras) const {
 	// x -= lr * dEdX
 	for (int parameter_id = 0; parameter_id < (int)parameters.size(); parameter_id++) {
 		int size = parameters[parameter_id].GetShape().GetSize();
@@ -25,14 +139,77 @@ void SGDOptimizer::UpdateCallback(const std::vector<Tensor> &parameters, const s
 		float *gradient_data = gradients[parameter_id].GetData();
 		if (!gradient_data)
 			continue;
-		float alpha = -learning_rate_;
-#ifdef USE_CUDA
-		if (GetGraph()->GetDeviceType() == GPU) {
-			CUBLAS_CALL(cublasSaxpy_v2(GetGraph()->GetDevice()->GetCuBLASHandle(),
-				size, &alpha, gradient_data, 1, parameter_data, 1));
-		}
-		else
-#endif
-			cblas_saxpy(size, alpha, gradient_data, 1, parameter_data, 1);
+		saxpy(GetGraph()->GetDevice(), size, -learning_rate_, gradient_data, parameter_data);
 	}
 }
+
+AdaGradOptimizer::AdaGradOptimizer(Graph *graph, float initial_learning_rate, float epsilon)
+	: Optimizer(graph), initial_learning_rate_(initial_learning_rate), epsilon_(epsilon) {
+}
+
+int AdaGradOptimizer::GetExtraDataCount() const {
+	return 1;
+}
+
+struct AdaGradUpdateG {
+	__host__ __device__ float operator()(float g, float grad) {
+		return g + grad * grad;
+	}
+};
+
+struct AdaGradUpdateParam {
+	float lr, epsilon;
+
+	__host__ __device__ float operator()(float param, float grad, float g) {
+		return param - lr * (grad / (sqrt(g) + epsilon));
+	}
+};
+
+void AdaGradOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
+	const std::vector<Tensor> &gradients,
+	const std::vector<Tensor> &extras) const {
+
+	for (int parameter_id = 0; parameter_id < (int)parameters.size(); parameter_id++) {
+		int size = parameters[parameter_id].GetShape().GetSize();
+		float *parameter_data = parameters[parameter_id].GetData();
+		float *gradient_data = gradients[parameter_id].GetData();
+		float *g_data = extras[parameter_id].GetData();
+		Transform2(GetGraph()->GetDevice(), size, g_data, gradient_data, g_data,
+			AdaGradUpdateG());
+		Transform3(GetGraph()->GetDevice(), size, parameter_data, gradient_data, g_data,
+			parameter_data, AdaGradUpdateParam{ initial_learning_rate_, epsilon_ });
+	}
+}
+
+RmsPropOptimizer::RmsPropOptimizer(Graph *graph, float initial_learning_rate, float alpha, float epsilon)
+	: Optimizer(graph), initial_learning_rate_(initial_learning_rate), alpha_(alpha), epsilon_(epsilon) {
+}
+
+int RmsPropOptimizer::GetExtraDataCount() const {
+	return 1;
+}
+
+struct RmsPropUpdateG {
+	float alpha;
+
+	__host__ __device__ float operator()(float g, float grad) {
+		return g * alpha + grad * grad * (1 - alpha);
+	}
+};
+
+void RmsPropOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
+	const std::vector<Tensor> &gradients,
+	const std::vector<Tensor> &extras) const {
+
+	for (int parameter_id = 0; parameter_id < (int)parameters.size(); parameter_id++) {
+		int size = parameters[parameter_id].GetShape().GetSize();
+		float *parameter_data = parameters[parameter_id].GetData();
+		float *gradient_data = gradients[parameter_id].GetData();
+		float *g_data = extras[parameter_id].GetData();
+		Transform2(GetGraph()->GetDevice(), size, g_data, gradient_data, g_data,
+			RmsPropUpdateG{ alpha_ });
+		Transform3(GetGraph()->GetDevice(), size, parameter_data, gradient_data, g_data,
+			parameter_data, AdaGradUpdateParam{ initial_learning_rate_, epsilon_ });
+	}
+}
+

@@ -7,7 +7,7 @@
 
 #include <cudnn.h>
 
-static const int kThreadsPerBlock = 32;
+static const int kThreadsPerBlock = 128;
 
 static inline __device__ int GetTensorStorageIndex(int logical_index, int ndims, int *elems, int *strides) {
 	int ret = 0;

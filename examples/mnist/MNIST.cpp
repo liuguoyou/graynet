@@ -100,7 +100,9 @@ int main() {
 	std::cout << "Trainset size: " << trainset.size() << std::endl;
 	std::cout << "Testset size: " << testset.size() << std::endl;
 
-	SGDOptimizer optimizer(&graph, 0.01f);
+	//SGDOptimizer optimizer(&graph, 0.01f);
+	//AdaGradOptimizer optimizer(&graph);
+	RmsPropOptimizer optimizer(&graph);
 
 	int batch_size = 32;
 	float loss = 0, accuracy = 0;

@@ -1,5 +1,7 @@
 #pragma once
 
+/*! This is an internal header file */
+
 #ifdef _MSC_VER
 #define DEBUG_BREAK()	__debugbreak()
 #else
