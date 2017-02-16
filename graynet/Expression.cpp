@@ -1200,6 +1200,50 @@ Expression ReduceSum(const Expression &x) {
 	return CreateDeviceSpecificNode<ReduceSumNodeFactory>(graph, x.GetNodeIndex());
 }
 
+class SliceNode : public Node {
+public:
+	SliceNode(int node, const Shape &start, const Shape &size) : Node{ node }, start_(start), size_(size) {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		if (start_.GetDimCount() != 1 || size_.GetDimCount() != 1)
+			abort();
+		return size_;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		if (x[0]->GetBatchSize() != 1)
+			abort();
+		float *ptr = x[0]->GetData() + start_.GetDim(0);
+		int size = size_.GetDim(0) * sizeof(float);
+		graph->GetDevice()->CopyMemory(y->GetData(), ptr, size);
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+		int count = size_.GetDim(0);
+		float *ptr = dEdX_data + start_.GetDim(0);
+#ifdef USE_CUDA
+		if (graph->GetDeviceType() == GPU) {
+			float alpha = 1.f;
+			cublasSaxpy_v2(graph->GetDevice()->GetCuBLASHandle(), count,
+				&alpha, dEdY_data, 1, ptr, 1);
+		}
+		else
+#endif
+			cblas_saxpy(count, 1.f, dEdY_data, 1, ptr, 1);
+	}
+
+private:
+	Shape start_, size_;
+};
+
+Expression Slice(const Expression &x, const Shape &start, const Shape &size) {
+	Graph *graph = x.GetGraph();
+	return graph->AddNode(new SliceNode(x.GetNodeIndex(), start, size));
+}
+
 class SoftmaxNodeCPU : public Node {
 public:
 	SoftmaxNodeCPU(int node) : Node{ node } {}

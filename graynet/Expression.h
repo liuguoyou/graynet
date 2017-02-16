@@ -167,6 +167,9 @@ Expression Reshape(const Expression &x, const Shape &shape);
 /*! Reduce one dimension */
 Expression ReduceSum(const Expression &x);
 
+/*! Slice input */
+Expression Slice(const Expression &x, const Shape &start, const Shape &size);
+
 /*! Softmax function over the last dimension: y = exp(x_i) / sum(exp(x_i)) */
 Expression Softmax(const Expression &x);
 
