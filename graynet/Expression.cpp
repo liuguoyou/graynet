@@ -471,8 +471,8 @@ Expression operator-(const Expression &x) {
 	return CreateUnaryOpNode<ElemNegForward, ElemNegBackward>(x);
 }
 
-Expression Sqr(const Expression &x) {
-	return CreateUnaryOpNode<SqrForward, SqrBackward>(x);
+Expression Square(const Expression &x) {
+	return CreateUnaryOpNode<SquareForward, SquareBackward>(x);
 }
 
 Expression Cube(const Expression &x) {
@@ -481,6 +481,46 @@ Expression Cube(const Expression &x) {
 
 Expression Exp(const Expression &x) {
 	return CreateUnaryOpNode<ExpForward, ExpBackward>(x);
+}
+
+Expression Log(const Expression &x) {
+	return CreateUnaryOpNode<LogForward, LogBackward>(x);
+}
+
+Expression Abs(const Expression &x) {
+	return CreateUnaryOpNode<AbsForward, AbsBackward>(x);
+}
+
+Expression Sqrt(const Expression &x) {
+	return CreateUnaryOpNode<SqrtForward, SqrtBackward>(x);
+}
+
+Expression Cbrt(const Expression &x) {
+	return CreateUnaryOpNode<CbrtForward, CbrtBackward>(x);
+}
+
+Expression Sin(const Expression &x) {
+	return CreateUnaryOpNode<SinForward, SinBackward>(x);
+}
+
+Expression Cos(const Expression &x) {
+	return CreateUnaryOpNode<CosForward, CosBackward>(x);
+}
+
+Expression Tan(const Expression &x) {
+	return CreateUnaryOpNode<TanForward, TanBackward>(x);
+}
+
+Expression Asin(const Expression &x) {
+	return CreateUnaryOpNode<AsinForward, AsinBackward>(x);
+}
+
+Expression Acos(const Expression &x) {
+	return CreateUnaryOpNode<AcosForward, AcosBackward>(x);
+}
+
+Expression Atan(const Expression &x) {
+	return CreateUnaryOpNode<AtanForward, AtanBackward>(x);
 }
 
 Expression Sigmoid(const Expression &x) {

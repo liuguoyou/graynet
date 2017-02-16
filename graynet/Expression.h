@@ -89,13 +89,43 @@ Expression operator/(const Expression &lhs, float rhs);
 Expression operator-(const Expression &x);
 
 /*! Element-wise square function: y = x^2 */
-Expression Sqr(const Expression &x);
+Expression Square(const Expression &x);
 
 /*! Element-wise cube function: y = x^3 */
 Expression Cube(const Expression &x);
 
 /*! Element-wise exponential function: y = exp(x) */
 Expression Exp(const Expression &x);
+
+/*! Element-wise logarithm function: y = log(x) */
+Expression Log(const Expression &x);
+
+/*! Absolute value function: y = abs(x) */
+Expression Abs(const Expression &x);
+
+/*! Square root function: y = sqrt(x) */
+Expression Sqrt(const Expression &x);
+
+/*! Cubic root function: y = cbrt(x) */
+Expression Cbrt(const Expression &x);
+
+/*! Sine function: y = sin(x) */
+Expression Sin(const Expression &x);
+
+/*! Cosine function: y = cos(x) */
+Expression Cos(const Expression &x);
+
+/*! Tangent function: y = tan(x) */
+Expression Tan(const Expression &x);
+
+/*! Inverse sine function: y = asin(x) */
+Expression Asin(const Expression &x);
+
+/*! Inverse cosine function: y = acos(x) */
+Expression Acos(const Expression &x);
+
+/*! Inverse tangent function: y = actan(x) */
+Expression Atan(const Expression &x);
 
 /*! Sigmoid function: y = 1/(1+e^-x) */
 Expression Sigmoid(const Expression &x);
