@@ -134,11 +134,26 @@ DEFINE_FUNCTOR(AcosBackward, void, float x, float y, float *dYdX) { *dYdX = -1.f
 DEFINE_FUNCTOR(AtanForward, float, float x) { return atan(x); }
 DEFINE_FUNCTOR(AtanBackward, void, float x, float y, float *dYdX) { *dYdX = 1.f / (1.f + x * x); }
 
-DEFINE_FUNCTOR(SigmoidForward, float, float x) { return 1 / (1 + exp(x)); }
-DEFINE_FUNCTOR(SigmoidBackward, void, float x, float y, float *dYdX) { *dYdX = -y * y * exp(x); }
+DEFINE_FUNCTOR(SinhForward, float, float x) { return sinh(x); }
+DEFINE_FUNCTOR(SinhBackward, void, float x, float y, float *dYdX) { *dYdX = cosh(x); };
+
+DEFINE_FUNCTOR(CoshForward, float, float x) { return cosh(x); }
+DEFINE_FUNCTOR(CoshBackward, void, float x, float y, float *dYdX) { *dYdX = sinh(x); };
 
 DEFINE_FUNCTOR(TanhForward, float, float x) { return tanh(x); }
 DEFINE_FUNCTOR(TanhBackward, void, float x, float y, float *dYdX) { *dYdX = 1 - y * y; }
+
+DEFINE_FUNCTOR(AsinhForward, float, float x) { return asinh(x); }
+DEFINE_FUNCTOR(AsinhBackward, void, float x, float y, float *dYdX) { *dYdX = 1.f / sqrt(x * x + 1.f); }
+
+DEFINE_FUNCTOR(AcoshForward, float, float x) { return acosh(x); }
+DEFINE_FUNCTOR(AcoshBackward, void, float x, float y, float *dYdX) { *dYdX = 1.f / sqrt(x * x - 1.f); }
+
+DEFINE_FUNCTOR(AtanhForward, float, float x) { return atanh(x); }
+DEFINE_FUNCTOR(AtanhBackward, void, float x, float y, float *dYdX) { *dYdX = 1.f / (1.f - x * x); }
+
+DEFINE_FUNCTOR(SigmoidForward, float, float x) { return 1 / (1 + exp(x)); }
+DEFINE_FUNCTOR(SigmoidBackward, void, float x, float y, float *dYdX) { *dYdX = -y * y * exp(x); }
 
 DEFINE_FUNCTOR(ReLUForward, float, float x) { return fmax(0.f, x); }
 DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x > 0.f) ? 1.f : 0.f; }
@@ -192,6 +207,11 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 	INSTANTIATE_UNARY(device_type, AsinForward, AsinBackward) \
 	INSTANTIATE_UNARY(device_type, AcosForward, AcosBackward) \
 	INSTANTIATE_UNARY(device_type, AtanForward, AtanBackward) \
-	INSTANTIATE_UNARY(device_type, SigmoidForward, SigmoidBackward) \
+	INSTANTIATE_UNARY(device_type, SinhForward, SinhBackward) \
+	INSTANTIATE_UNARY(device_type, CoshForward, CoshBackward) \
 	INSTANTIATE_UNARY(device_type, TanhForward, TanhBackward) \
+	INSTANTIATE_UNARY(device_type, AsinhForward, AsinhBackward) \
+	INSTANTIATE_UNARY(device_type, AcoshForward, AcoshBackward) \
+	INSTANTIATE_UNARY(device_type, AtanhForward, AtanhBackward) \
+	INSTANTIATE_UNARY(device_type, SigmoidForward, SigmoidBackward) \
 	INSTANTIATE_UNARY(device_type, ReLUForward, ReLUBackward)

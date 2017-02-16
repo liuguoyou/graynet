@@ -127,11 +127,17 @@ Expression Acos(const Expression &x);
 /*! Inverse tangent function: y = actan(x) */
 Expression Atan(const Expression &x);
 
+/* Hyperbolic sine function: y = sinh(x) */
+Expression Sinh(const Expression &x);
+
+/* Hyperbolic cosine function: y = cosh(x) */
+Expression Cosh(const Expression &h);
+
+/* Hyperbolic tangent function: y = tanh(x) */
+Expression Tanh(const Expression &x);
+
 /*! Sigmoid function: y = 1/(1+e^-x) */
 Expression Sigmoid(const Expression &x);
-
-/*! Tanh function: y = tanh(x) */
-Expression Tanh(const Expression &x);
 
 /*! ReLU function: y = max(x, 0) */
 Expression ReLU(const Expression &x);

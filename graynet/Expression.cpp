@@ -523,12 +523,32 @@ Expression Atan(const Expression &x) {
 	return CreateUnaryOpNode<AtanForward, AtanBackward>(x);
 }
 
-Expression Sigmoid(const Expression &x) {
-	return CreateUnaryOpNode<SigmoidForward, SigmoidBackward>(x);
+Expression Sinh(const Expression &x) {
+	return CreateUnaryOpNode<SinhForward, SinhBackward>(x);
+}
+
+Expression Cosh(const Expression &x) {
+	return CreateUnaryOpNode<CoshForward, CoshBackward>(x);
 }
 
 Expression Tanh(const Expression &x) {
 	return CreateUnaryOpNode<TanhForward, TanhBackward>(x);
+}
+
+Expression Asinh(const Expression &x) {
+	return CreateUnaryOpNode<AsinhForward, AsinhBackward>(x);
+}
+
+Expression Acosh(const Expression &x) {
+	return CreateUnaryOpNode<AcoshForward, AcoshBackward>(x);
+}
+
+Expression Atanh(const Expression &x) {
+	return CreateUnaryOpNode<AtanhForward, AtanhBackward>(x);
+}
+
+Expression Sigmoid(const Expression &x) {
+	return CreateUnaryOpNode<SigmoidForward, SigmoidBackward>(x);
 }
 
 Expression ReLU(const Expression &x) {
