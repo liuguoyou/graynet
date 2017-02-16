@@ -68,7 +68,7 @@ Expression operator-(float lhs, const Expression &rhs);
 Expression operator-(const Expression &lhs, float rhs);
 
 /*! Element-wise multiplication */
-Expression ElemMul(const Expression &lhs, const Expression &rhs);
+Expression operator*(const Expression &lhs, const Expression &rhs);
 
 /*! Element-wise multiplication */
 Expression operator*(float lhs, const Expression &rhs);
@@ -77,7 +77,7 @@ Expression operator*(float lhs, const Expression &rhs);
 Expression operator*(const Expression &lhs, float rhs);
 
 /*! Element-wise division */
-Expression ElemDiv(const Expression &lhs, const Expression &rhs);
+Expression operator/(const Expression &lhs, const Expression &rhs);
 
 /*! Element-wise division */
 Expression operator/(float lhs, const Expression &rhs);
@@ -107,7 +107,7 @@ Expression Tanh(const Expression &x);
 Expression ReLU(const Expression &x);
 
 /*! Matrix multiplication */
-Expression operator*(const Expression &lhs, const Expression &rhs);
+Expression MatMul(const Expression &lhs, const Expression &rhs);
 
 /*! Vector dot (only sparse dot is supported for now) */
 Expression Dot(const Expression &lhs, const Expression &rhs);

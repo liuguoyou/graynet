@@ -278,11 +278,11 @@ Expression operator-(const Expression &lhs, const Expression &rhs) {
 	return CreateBinaryOpNode<ElemSubForward, ElemSubBackward>(lhs, rhs);
 }
 
-Expression ElemMul(const Expression &lhs, const Expression &rhs) {
+Expression operator*(const Expression &lhs, const Expression &rhs) {
 	return CreateBinaryOpNode<ElemMulForward, ElemMulBackward>(lhs, rhs);
 }
 
-Expression ElemDiv(const Expression &lhs, const Expression &rhs) {
+Expression operator/(const Expression &lhs, const Expression &rhs) {
 	return CreateBinaryOpNode<ElemDivForward, ElemDivBackward>(lhs, rhs);
 }
 
@@ -635,7 +635,7 @@ public:
 	}
 };
 
-Expression operator*(const Expression &lhs, const Expression &rhs) {
+Expression MatMul(const Expression &lhs, const Expression &rhs) {
 	Graph *graph = lhs.GetGraph();
 	return graph->AddNode(new MatMulNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()));
 }

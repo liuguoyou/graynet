@@ -12,7 +12,7 @@ Expression LinearLayer::operator()(const char *name, const Expression &x, int ou
 	int input_dim = shape.GetDim(0);
 	graph->DefineParameter(&w, "w", Shape(output_dim, input_dim));
 	graph->DefineParameter(&b, "b", Shape(output_dim));
-	result = w * x + b;
+	result = MatMul(w, x) + b;
 	graph->PopScope();
 	return result;
 }

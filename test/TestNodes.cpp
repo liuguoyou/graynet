@@ -38,7 +38,7 @@ TEST_F(NodeTest, SimpleBatchTest) {
 	};
 	Expression weight = graph.AddParameter(Shape(2, 3), weight_data);
 	Expression x = BatchInput(&graph, 3, Shape(3), x_data);
-	x = weight * x;
+	x = MatMul(weight, x);
 	const float matvecmul_expected[] = {
 		0.09f, 0.38f,
 		0.4f, -0.21f,
@@ -179,7 +179,7 @@ TEST_F(NodeTest, MatVecMul) {
 	};
 	Expression x = graph.AddParameter(Shape(2, 3), x_data);
 	Expression y = graph.AddParameter(Shape(3), y_data);
-	Expression z = x * y;
+	Expression z = MatMul(x, y);
 	const float expected[] = { -3.16f, 5.66f };
 	CheckValue(z, expected);
 	z = Softmax(z);
