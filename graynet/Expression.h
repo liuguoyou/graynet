@@ -158,6 +158,9 @@ Expression Convolution(const Expression &x, const Expression &filter, const Shap
 /*! N-D Max Pooling */
 Expression MaxPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding);
 
+/*! N-D Average Pooling */
+Expression AvgPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding);
+
 /*! Reshape tensor */
 Expression Reshape(const Expression &x, const Shape &shape);
 

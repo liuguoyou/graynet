@@ -305,6 +305,19 @@ TEST_F(NodeTest, PoolingSimple) {
 	CheckGradient(x);
 }
 
+TEST_F(NodeTest, AvgPooling1D) {
+	// TODO: Automatic implement 1D in pooling operator.
+	const float x_data[] = { 1.f, 2.f, 3.f, 4.f, 5.f };
+	Expression x = graph.AddParameter(Shape(1, 5, 1), x_data);
+	x = AvgPooling(x, Shape(3, 1), Shape(1, 1), Shape(1, 0));
+	const float expected[] = { 1.5f, 2.f, 3.f, 4.f, 4.5f };
+	CheckValue(x, expected);
+	x = Softmax(Reshape(x, Shape(5)));
+	const int label = 1;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
 TEST_F(NodeTest, Dot) {
 	const float x_data[] = { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f };
 	const float y_data[] = { -0.1f, -0.3f, -0.7f, 0.2f, 0.3f };

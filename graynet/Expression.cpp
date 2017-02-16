@@ -1013,8 +1013,14 @@ Expression Convolution(const Expression &x, const Expression &filter, const Shap
 
 class PoolingNode : public Node {
 public:
-	PoolingNode(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding):
-		Node{ node }, filter_shape_(filter_shape), strides_(strides), padding_(padding) {
+	enum PoolingMode {
+		MaxPooling,
+		AvgPooling,
+		AvgPoolingWithPadding,
+	};
+
+	PoolingNode(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding, PoolingMode mode):
+		Node{ node }, filter_shape_(filter_shape), strides_(strides), padding_(padding), mode_(mode) {
 		CUDNN_CALL(cudnnCreatePoolingDescriptor(&pooling_desc_));
 		CUDNN_CALL(cudnnCreateTensorDescriptor(&x_desc_));
 		CUDNN_CALL(cudnnCreateTensorDescriptor(&y_desc_));
@@ -1055,7 +1061,16 @@ public:
 			x_strides[i] = x_dims[i + 1] * x_strides[i + 1];
 			y_strides[i] = y_dims[i + 1] * y_strides[i + 1];
 		}
-		CUDNN_CALL(cudnnSetPoolingNdDescriptor(pooling_desc_, CUDNN_POOLING_MAX, CUDNN_PROPAGATE_NAN,
+		cudnnPoolingMode_t pooling_mode;
+		if (mode_ == MaxPooling)
+			pooling_mode = CUDNN_POOLING_MAX;
+		else if (mode_ == AvgPooling)
+			pooling_mode = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
+		else if (mode_ == AvgPoolingWithPadding)
+			pooling_mode = CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING;
+		else
+			DEBUG_BREAK();
+		CUDNN_CALL(cudnnSetPoolingNdDescriptor(pooling_desc_, pooling_mode, CUDNN_PROPAGATE_NAN,
 			ndims, filter_shape_.data(), padding_.data(), strides_.data()));
 		CUDNN_CALL(cudnnSetTensorNdDescriptor(x_desc_, CUDNN_DATA_FLOAT, ndims + 2, x_dims, x_strides));
 		CUDNN_CALL(cudnnSetTensorNdDescriptor(y_desc_, CUDNN_DATA_FLOAT, ndims + 2, y_dims, y_strides));
@@ -1082,6 +1097,7 @@ public:
 
 private:
 	Shape filter_shape_, strides_, padding_;
+	PoolingMode mode_;
 #ifdef USE_CUDA
 	cudnnPoolingDescriptor_t pooling_desc_;
 	cudnnTensorDescriptor_t x_desc_, y_desc_;
@@ -1090,7 +1106,12 @@ private:
 
 Expression MaxPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding) {
 	Graph *graph = x.GetGraph();
-	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding));
+	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding, PoolingNode::MaxPooling));
+}
+
+Expression AvgPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding) {
+	Graph *graph = x.GetGraph();
+	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding, PoolingNode::AvgPooling));
 }
 
 class ReshapeNode : public Node {
