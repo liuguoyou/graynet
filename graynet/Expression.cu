@@ -7,10 +7,12 @@
 
 #include <type_traits>
 #include <cudnn.h>
+#include <cub/block/block_reduce.cuh>
 
 static const int kThreadsPerBlock = 128;
+static const int kMaxThreadsPerBlock = 512;
 
-static inline __device__ int GetTensorStorageIndex(int logical_index, int ndims, int *elems, int *strides) {
+static inline __device__ int GetTensorStorageIndex(int logical_index, int ndims, const int *elems, const int *strides) {
 	int ret = 0;
 	for (int i = 0; i < ndims; i++) {
 		int cur = logical_index / elems[i];
@@ -36,29 +38,94 @@ static __global__ void BinaryForwardKernel(const float *lhs, const float *rhs, f
 	}
 }
 
-struct BinaryBackwardDims {
-	int elems[kMaxTensorDim + 1];
-	int const_elems[kMaxTensorDim + 1], reduce_elems[kMaxTensorDim + 1];
-	int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
+struct ReduceDesc {
+	int regular_sizes[kMaxTensorDim + 1], reduce_sizes[kMaxTensorDim + 1];
+	int strides[kMaxTensorDim + 1];
 };
 
-template<typename BackwardFunc>
-static __global__ void BinaryBackwardKernel(const float *lhs, const float *rhs, const float *y,
-	const float *dEdY, float *dEdL, float *dEdR, int nconst_elems, int nreduce_elems, int ndims,
-	BinaryBackwardDims backward) {
-	int i = blockDim.x * blockIdx.x + threadIdx.x;
-	if (i < nconst_elems) {
-		int base_index = GetTensorStorageIndex(i, ndims, backward.const_elems, backward.elems);
-		for (int j = 0; j < nreduce_elems; j++) {
-			int index = base_index + GetTensorStorageIndex(j, ndims, backward.reduce_elems, backward.elems);
-			int lhs_index = GetTensorStorageIndex(index, ndims, backward.elems, backward.lhs_strides);
-			int rhs_index = GetTensorStorageIndex(index, ndims, backward.elems, backward.rhs_strides);
-			float dYdL_value, dYdR_value;
-			BackwardFunc()(lhs[lhs_index], rhs[rhs_index], y[index], &dYdL_value, &dYdR_value);
-			float dEdY_value = dEdY[index];
-			dEdL[lhs_index] += dEdY_value * dYdL_value;
-			dEdR[rhs_index] += dEdY_value * dYdR_value;
+// Reduction modes:
+// 0. No reduction : each thread handle one output element from one input element.
+// 1. Small reduction : reduction size is less than kSmallReducesInBlock, each thread do one reduction. (TODO)
+// 2. Medium reduction : reduction size is less than kMaxThreadsPerBlock, each warp do one reduction (TODO)
+// 3. Large reduction : reduction size is less than kMaxThreadsPerBlock * kMaxReducePerThread,
+// each thread block do one reduction.
+// 4. Huge reduction : reduction size is larger than kMaxThreadsPerBlock * kMaxReducePerThread,
+// reduce is distributed over several blocks. (TODO, kMaxReducePerThread is currently set to 2147483647).
+
+//static const int kSmallReducesInBlock = 32;
+//static const int kMaxSmallReductionSize = kMaxThreadsPerBlock / kSmallReducesInBlock;
+static const int kMaxReducePerThread = 2147483647;
+
+template<typename TransformFunc, typename StoreFunc, typename ExtraData>
+static __global__ void TransformReduceKernel(TransformFunc transform_func, StoreFunc store_func,
+	int dims, int regular_total, ExtraData extra_data) {
+	int index = blockIdx.x * blockDim.x + threadIdx.x;
+	if (index < regular_total) {
+		float value = transform_func(index, extra_data);
+		store_func(index, value, extra_data);
+	}
+}
+
+template<typename TransformFunc, typename ReduceFunc, typename StoreFunc, typename ExtraData>
+static __global__ void TransformReduceKernel(TransformFunc transform_func, ReduceFunc reduce_func, StoreFunc store_func,
+	int dims, int regular_total, int reduce_total, ReduceDesc reduce_desc, int reduces_per_thread, ExtraData extra_data) {
+	typedef cub::BlockReduce<float, kThreadsPerBlock> BlockReduceT;
+	__shared__ typename BlockReduceT::TempStorage temp_storage;
+
+	int regular_idx = blockIdx.x;
+	int reduce_idx_base = threadIdx.x * reduces_per_thread;
+	int base_idx = GetTensorStorageIndex(regular_idx, dims, reduce_desc.regular_sizes, reduce_desc.strides);
+	// First element
+	int index = base_idx + GetTensorStorageIndex(reduce_idx_base, dims, reduce_desc.reduce_sizes, reduce_desc.strides);
+	float value = transform_func(index, extra_data);
+	for (int reduce_idx = reduce_idx_base + 1; reduce_idx < reduce_idx_base + reduces_per_thread; reduce_idx++) {
+		if (reduce_idx < reduce_total) {
+			int index = base_idx + GetTensorStorageIndex(reduce_idx, dims, reduce_desc.reduce_sizes, reduce_desc.strides);
+			float cur_value = transform_func(index, extra_data);
+			// Reduce element
+			value = reduce_func(value, cur_value);
 		}
+	}
+
+	float result = BlockReduceT(temp_storage).Reduce(value, reduce_func, reduce_total);
+	if (threadIdx.x == 0)
+		store_func(base_idx, result, extra_data);
+}
+
+template<typename TransformFunc, typename ReduceFunc, typename StoreFunc, typename ExtraData>
+static void TransformReduce(TransformFunc transform_func, ReduceFunc reduce_func, StoreFunc store_func,
+	int dims, int regular_total, int regular_sizes[kMaxTensorDim + 1],
+	int reduce_total, int reduce_sizes[kMaxTensorDim + 1], int strides[kMaxTensorDim + 1],
+	const ExtraData &extra_data) {
+
+	ReduceDesc desc;
+	memcpy(&desc.regular_sizes, regular_sizes, sizeof(desc.regular_sizes));
+	memcpy(&desc.reduce_sizes, reduce_sizes, sizeof(desc.reduce_sizes));
+	memcpy(&desc.strides, strides, sizeof(desc.strides));
+	
+	if (reduce_total == 1) {
+		// 0. No reduction
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (regular_total + threadsPerBlock - 1) / threadsPerBlock;
+		
+		TransformReduceKernel<<<blocksPerGrid, threadsPerBlock>>>(transform_func, store_func,
+			dims, regular_total, extra_data);
+	}
+	else {
+		// 3. Large reduction
+		int reduces_per_thread = (reduce_total + kMaxThreadsPerBlock - 1) / kMaxThreadsPerBlock;
+		if (reduces_per_thread > kMaxReducePerThread)
+			DEBUG_BREAK(); // TODO
+
+		int blocksPerGrid = regular_total;
+		int threadsPerBlock;
+		if (reduce_total < kMaxThreadsPerBlock)
+			threadsPerBlock = reduce_total;
+		else
+			threadsPerBlock = kMaxThreadsPerBlock;
+
+		TransformReduceKernel<<<blocksPerGrid, threadsPerBlock>>>(transform_func, reduce_func, store_func,
+			dims, regular_total, reduce_total, desc, reduces_per_thread, extra_data);
 	}
 }
 
@@ -77,6 +144,38 @@ static void GetTensorStrides(const Tensor *tensor, int strides[kMaxTensorDim + 1
 	}
 	strides[0] = (batch_size == 1) ? 0 : cur;
 }
+
+template<typename DimFunc>
+static void GetReduceDims(DimFunc dim_func, int dims, int *regular_total, int *reduce_total,
+	int regular_sizes[kMaxTensorDim + 1], int reduce_sizes[kMaxTensorDim + 1], int strides[kMaxTensorDim + 1]) {
+	int regular_tot = 1, reduce_tot = 1;
+	int tot = 1;
+	for (int i = dims - 1; i >= 0; i--) {
+		std::pair<int, int> dim_desc = dim_func(i);
+		int from_dim = dim_desc.first, to_dim = dim_desc.second;
+		strides[i] = tot;
+		regular_sizes[i] = regular_tot;
+		reduce_sizes[i] = reduce_tot;
+		tot *= from_dim;
+		if (from_dim == to_dim) {
+			// Regular dimension
+			regular_tot *= from_dim;
+		}
+		else if (to_dim == 1) {
+			// Reduce dimension
+			reduce_tot *= from_dim;
+		}
+		else // Invalid reduction operation
+			DEBUG_BREAK();
+	}
+	*regular_total = regular_tot;
+	*reduce_total = reduce_tot;
+}
+
+struct BinaryReduceDesc {
+	int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
+	int strides[kMaxTensorDim + 1];
+};
 
 template<typename ForwardFunc, typename BackwardFunc>
 class BinaryOpNode<GPU, ForwardFunc, BackwardFunc> : public Node {
@@ -141,38 +240,61 @@ public:
 		const Shape &y_shape = y->GetShape();
 		int ndims = 1 + y_shape.GetDimCount();
 
-		BinaryBackwardDims backward;
-		// Fill elems[]
-		backward.elems[ndims - 1] = 1;
-		for (int i = ndims - 2; i >= 0; i--)
-			backward.elems[i] = backward.elems[i + 1] * y_shape.GetDim(i);
-		// Fill const_elems[] and reduce_elems[]
-		int nconst_elems = 1, nreduce_elems = 1;
-		for (int i = ndims - 1; i >= 1; i--) {
-			backward.const_elems[i] = nconst_elems;
-			backward.reduce_elems[i] = nreduce_elems;
-			// Const dimension or reduce dimension ?
-			if (lhs_shape.GetDim(i - 1) == rhs_shape.GetDim(i - 1))
-				nconst_elems *= y_shape.GetDim(i - 1);
-			else
-				nreduce_elems *= y_shape.GetDim(i - 1);
-		}
-		backward.const_elems[0] = nconst_elems;
-		backward.reduce_elems[0] = nreduce_elems;
-		if (x[0]->GetBatchSize() == x[1]->GetBatchSize())
-			nconst_elems *= y->GetBatchSize();
-		else
-			nreduce_elems *= y->GetBatchSize();
-		// Fill lhs_strides[] and rhs_strides[]
-		GetTensorStrides(x[0], backward.lhs_strides);
-		GetTensorStrides(x[1], backward.rhs_strides);
+		int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
+		GetTensorStrides(x[0], lhs_strides);
+		GetTensorStrides(x[1], rhs_strides);
 
-		int threadsPerBlock = kThreadsPerBlock;
-		int blocksPerGrid = (nconst_elems + kThreadsPerBlock - 1) / kThreadsPerBlock;
-		BinaryBackwardKernel<BackwardFunc><<<blocksPerGrid, threadsPerBlock>>>(
-			lhs_data, rhs_data, y_data, dEdY_data, dEdL_data, dEdR_data,
-			nconst_elems, nreduce_elems, ndims, backward);
-		CUDA_CALL(cudaGetLastError());
+		int regular_total, reduce_total;
+		int regular_sizes[kMaxTensorDim + 1], reduce_sizes[kMaxTensorDim + 1];
+		int strides[kMaxTensorDim + 1];
+		BinaryReduceDesc desc;
+
+		/* LHS */
+		{
+			GetReduceDims([&](int dim) {
+				return dim == 0 ? std::make_pair(y->GetBatchSize(), x[0]->GetBatchSize())
+					: std::make_pair(y_shape.GetDim(dim - 1), lhs_shape.GetDim(dim - 1));
+			}, ndims, &regular_total, &reduce_total, regular_sizes, reduce_sizes, strides);
+
+			memcpy(&desc.lhs_strides, lhs_strides, sizeof(desc.lhs_strides));
+			memcpy(&desc.rhs_strides, rhs_strides, sizeof(desc.rhs_strides));
+			memcpy(&desc.strides, strides, sizeof(desc.strides));
+			auto transform_func = [=] __device__(int index, const BinaryReduceDesc &desc) {
+				int lhs_index = GetTensorStorageIndex(index, ndims, desc.strides, desc.lhs_strides);
+				int rhs_index = GetTensorStorageIndex(index, ndims, desc.strides, desc.rhs_strides);
+				float dYdL_value, dYdR_value;
+				BackwardFunc()(lhs_data[lhs_index], rhs_data[rhs_index], y_data[index], &dYdL_value, &dYdR_value);
+				return dEdY_data[index] * dYdL_value;
+			};
+			auto store_func = [=] __device__(int index, float result, const BinaryReduceDesc &desc) {
+				int lhs_index = GetTensorStorageIndex(index, ndims, desc.strides, desc.lhs_strides);
+				dEdL_data[lhs_index] += result;
+			};
+			TransformReduce(transform_func, cub::Sum(), store_func,
+				ndims, regular_total, regular_sizes, reduce_total, reduce_sizes, strides, desc);
+		}
+
+		/* RHS */
+		{
+			GetReduceDims([&](int dim) {
+				return dim == 0 ? std::make_pair(y->GetBatchSize(), x[1]->GetBatchSize())
+					: std::make_pair(y_shape.GetDim(dim - 1), rhs_shape.GetDim(dim - 1));
+			}, ndims, &regular_total, &reduce_total, regular_sizes, reduce_sizes, strides);
+
+			auto transform_func = [=] __device__(int index, const BinaryReduceDesc &desc) {
+				int lhs_index = GetTensorStorageIndex(index, ndims, desc.strides, desc.lhs_strides);
+				int rhs_index = GetTensorStorageIndex(index, ndims, desc.strides, desc.rhs_strides);
+				float dYdL_value, dYdR_value;
+				BackwardFunc()(lhs_data[lhs_index], rhs_data[rhs_index], y_data[index], &dYdL_value, &dYdR_value);
+				return dEdY_data[index] * dYdR_value;
+			};
+			auto store_func = [=] __device__(int index, float result, const BinaryReduceDesc &desc) {
+				int rhs_index = GetTensorStorageIndex(index, ndims, desc.strides, desc.rhs_strides);
+				dEdR_data[rhs_index] += result;
+			};
+			TransformReduce(transform_func, cub::Sum(), store_func,
+				ndims, regular_total, regular_sizes, reduce_total, reduce_sizes, strides, desc);
+		}
 	}
 };
 
