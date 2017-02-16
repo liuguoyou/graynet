@@ -11,45 +11,38 @@
 #endif
 
 template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
-class BinaryOpNode : public Node {
-public:
-	BinaryOpNode(int lhs_node, int rhs_node);
+struct BinaryOpNodeFactory {
+	Node *Create(int lhs_node, int rhs_node);
 };
 
 template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
-class BinaryLeftScalarOpNode : public Node {
-public:
-	BinaryLeftScalarOpNode(float lhs_scalar, int rhs_node);
+struct BinaryLeftScalarOpNodeFactory {
+	Node *Create(float lhs_scalar, int rhs_node);
 };
 
 template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
-class BinaryRightScalarOpNode : public Node {
-public:
-	BinaryRightScalarOpNode(int lhs_node, float rhs_scalar);
+struct BinaryRightScalarOpNodeFactory {
+	Node *Create(int lhs_node, float rhs_scalar);
 };
 
 template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
-class UnaryOpNode : public Node {
-public:
-	UnaryOpNode(int node);
+struct UnaryOpNodeFactory {
+	Node *Create(int node);
 };
 
 template<typename Dummy, DeviceType DeviceType>
-class SoftmaxNode : public Node {
-public:
-	SoftmaxNode(int node);
+struct SoftmaxNodeFactory {
+	Node *Create(int node);
 };
 
 template<typename Dummy, DeviceType DeviceType>
-class CrossEntropyNode : public Node {
-public:
-	CrossEntropyNode(Graph *graph, int node, const std::vector<int> &labels);
+struct CrossEntropyNodeFactory {
+	Node *Create(Graph *graph, int node, const std::vector<int> &labels);
 };
 
 template<typename Dummy, DeviceType DeviceType>
-class ClassificationAccuracyNode : public Node {
-public:
-	ClassificationAccuracyNode(Graph *graph, int node, const std::vector<int> &labels);
+struct ClassificationAccuracyNodeFactory {
+	Node *Create(Graph *graph, int node, const std::vector<int> &labels);
 };
 
 #define DEFINE_FUNCTOR(name, ret_type, ...) \
@@ -160,7 +153,7 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 
 // Instantiation helpers
 #define INSTANTIATE_BINARY(device_type, forward_func, backward_func) \
-	template class BinaryOpNode<device_type, forward_func, backward_func>;
+	template struct BinaryOpNodeFactory<device_type, forward_func, backward_func>;
 
 #define INSTANTIATE_BINARY_OPS(device_type) \
 	INSTANTIATE_BINARY(device_type, ElemAddForward, ElemAddBackward) \
@@ -172,7 +165,7 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 	INSTANTIATE_BINARY(device_type, BinaryClassificationAccuracyForward, BinaryNoBackward)
 
 #define INSTANTIATE_BINARY_LEFT_SCALAR(device_type, forward_func, backward_func) \
-	template class BinaryLeftScalarOpNode<device_type, forward_func, backward_func>;
+	template struct BinaryLeftScalarOpNodeFactory<device_type, forward_func, backward_func>;
 
 #define INSTANTIATE_BINARY_LEFT_SCALAR_OPS(device_type) \
 	INSTANTIATE_BINARY_LEFT_SCALAR(device_type, ElemAddForward, ElemAddBackward) \
@@ -181,7 +174,7 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 	INSTANTIATE_BINARY_LEFT_SCALAR(device_type, ElemDivForward, ElemDivBackward)
 
 #define INSTANTIATE_BINARY_RIGHT_SCALAR(device_type, forward_func, backward_func) \
-	template class BinaryRightScalarOpNode<device_type, forward_func, backward_func>;
+	template struct BinaryRightScalarOpNodeFactory<device_type, forward_func, backward_func>;
 
 #define INSTANTIATE_BINARY_RIGHT_SCALAR_OPS(device_type) \
 	INSTANTIATE_BINARY_RIGHT_SCALAR(device_type, ElemAddForward, ElemAddBackward) \
@@ -190,7 +183,7 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 	INSTANTIATE_BINARY_RIGHT_SCALAR(device_type, ElemDivForward, ElemDivBackward)
 
 #define INSTANTIATE_UNARY(device_type, forward_func, backward_func) \
-	template class UnaryOpNode<device_type, forward_func, backward_func>;
+	template struct UnaryOpNodeFactory<device_type, forward_func, backward_func>;
 
 #define INSTANTIATE_UNARY_OPS(device_type) \
 	INSTANTIATE_UNARY(device_type, ElemNegForward, ElemNegBackward) \

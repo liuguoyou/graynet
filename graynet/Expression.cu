@@ -178,9 +178,9 @@ struct BinaryReduceDesc {
 };
 
 template<typename ForwardFunc, typename BackwardFunc>
-class BinaryOpNode<GPU, ForwardFunc, BackwardFunc> : public Node {
+class BinaryOpNodeGPU : public Node {
 public:
-	BinaryOpNode(int lhs_node, int rhs_node) : Node{ lhs_node, rhs_node } {}
+	BinaryOpNodeGPU(int lhs_node, int rhs_node) : Node{ lhs_node, rhs_node } {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		const Shape &lhs_shape = x_shapes[0];
@@ -218,10 +218,10 @@ public:
 			forward.elems[i] = forward.elems[i + 1] * y_shape.GetDim(i);
 		GetTensorStrides(x[0], forward.lhs_strides);
 		GetTensorStrides(x[1], forward.rhs_strides);
-		
+
 		int threadsPerBlock = kThreadsPerBlock;
 		int blocksPerGrid = (nelems + threadsPerBlock - 1) / threadsPerBlock;
-		BinaryForwardKernel<ForwardFunc><<<blocksPerGrid, threadsPerBlock>>>(
+		BinaryForwardKernel<ForwardFunc> << <blocksPerGrid, threadsPerBlock >> > (
 			lhs_data, rhs_data, y_data, nelems, ndims, forward);
 		CUDA_CALL(cudaGetLastError());
 	}
@@ -298,6 +298,13 @@ public:
 	}
 };
 
+template<typename ForwardFunc, typename BackwardFunc>
+struct BinaryOpNodeFactory<GPU, ForwardFunc, BackwardFunc> {
+	Node *Create(int lhs_node, int rhs_node) {
+		return new BinaryOpNodeGPU<ForwardFunc, BackwardFunc>(lhs_node, rhs_node);
+	}
+};
+
 template<typename ForwardFunc>
 static __global__ void BinaryLeftScalarForwardKernel(float lhs, const float *rhs, float *y, int N) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -317,9 +324,9 @@ static __global__ void BinaryLeftScalarBackwardKernel(float lhs, const float *rh
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
-class BinaryLeftScalarOpNode<GPU, ForwardFunc, BackwardFunc> : public Node {
+class BinaryLeftScalarOpNodeGPU : public Node {
 public:
-	BinaryLeftScalarOpNode(float lhs_scalar, int rhs_node) : Node{ rhs_node }, lhs_scalar_(lhs_scalar) {}
+	BinaryLeftScalarOpNodeGPU(float lhs_scalar, int rhs_node) : Node{ rhs_node }, lhs_scalar_(lhs_scalar) {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		return x_shapes[0];
@@ -360,6 +367,13 @@ private:
 	float lhs_scalar_;
 };
 
+template<typename ForwardFunc, typename BackwardFunc>
+struct BinaryLeftScalarOpNodeFactory<GPU, ForwardFunc, BackwardFunc> {
+	Node *Create(float lhs_scalar, int rhs_node) {
+		return new BinaryLeftScalarOpNodeGPU<ForwardFunc, BackwardFunc>(lhs_scalar, rhs_node);
+	}
+};
+
 template<typename ForwardFunc>
 static __global__ void BinaryRightScalarForwardKernel(const float *lhs, float rhs, float *y, int N) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -379,9 +393,9 @@ static __global__ void BinaryRightScalarBackwardKernel(const float *lhs, float r
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
-class BinaryRightScalarOpNode<GPU, ForwardFunc, BackwardFunc> : public Node {
+class BinaryRightScalarOpNodeGPU : public Node {
 public:
-	BinaryRightScalarOpNode(int lhs_node, float rhs_scalar) : Node{ lhs_node }, rhs_scalar_(rhs_scalar) {}
+	BinaryRightScalarOpNodeGPU(int lhs_node, float rhs_scalar) : Node{ lhs_node }, rhs_scalar_(rhs_scalar) {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		return x_shapes[0];
@@ -422,6 +436,13 @@ private:
 	float rhs_scalar_;
 };
 
+template<typename ForwardFunc, typename BackwardFunc>
+struct BinaryRightScalarOpNodeFactory<GPU, ForwardFunc, BackwardFunc> {
+	Node *Create(int lhs_node, float rhs_scalar) {
+		return new BinaryRightScalarOpNodeGPU<ForwardFunc, BackwardFunc>(lhs_node, rhs_scalar);
+	}
+};
+
 template<typename ForwardFunc>
 static __global__ void UnaryForwardKernel(const float *x, float *y, int N) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -441,9 +462,9 @@ static __global__ void UnaryBackwardKernel(const float *x, const float *y,
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
-class UnaryOpNode<GPU, ForwardFunc, BackwardFunc> : public Node {
+class UnaryOpNodeGPU : public Node {
 public:
-	UnaryOpNode(int node) : Node{ node } {}
+	UnaryOpNodeGPU(int node) : Node{ node } {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		return x_shapes[0];
@@ -476,15 +497,21 @@ public:
 	}
 };
 
+template<typename ForwardFunc, typename BackwardFunc>
+struct UnaryOpNodeFactory<GPU, ForwardFunc, BackwardFunc> {
+	Node *Create(int node) {
+		return new UnaryOpNodeGPU<ForwardFunc, BackwardFunc>(node);
+	}
+};
+
 INSTANTIATE_BINARY_OPS(GPU)
 INSTANTIATE_BINARY_LEFT_SCALAR_OPS(GPU)
 INSTANTIATE_BINARY_RIGHT_SCALAR_OPS(GPU)
 INSTANTIATE_UNARY_OPS(GPU)
 
-template<typename Dummy>
-class SoftmaxNode<Dummy, GPU> : public Node {
+class SoftmaxNodeGPU : public Node {
 public:
-	SoftmaxNode(int node) : Node{ node } {}
+	SoftmaxNodeGPU(int node) : Node{ node } {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		return x_shapes[0];
@@ -531,7 +558,14 @@ public:
 	}
 };
 
-template class SoftmaxNode<void, GPU>;
+template<typename Dummy>
+struct SoftmaxNodeFactory<Dummy, GPU> {
+	Node *Create(int node) {
+		return new SoftmaxNodeGPU(node);
+	}
+};
+
+template class SoftmaxNodeFactory<void, GPU>;
 
 static __global__ void CrossEntropyForward(const float *x, float *y, const int *labels, int N, int dim_size) {
 	// y = -log(x_k)
@@ -552,10 +586,9 @@ static __global__ void CrossEntropyBackward(const float *x, const int *labels,
 	}
 }
 
-template<typename Dummy>
-class CrossEntropyNode<Dummy, GPU> : public Node {
+class CrossEntropyNodeGPU : public Node {
 public:
-	CrossEntropyNode(Graph *graph, int node, const std::vector<int> &labels) : Node{ node } {
+	CrossEntropyNodeGPU(Graph *graph, int node, const std::vector<int> &labels) : Node{ node } {
 		int size = (int)labels.size() * sizeof(int);
 		int *labels_pinned = (int*)graph->GetDevice()->AllocateMemory(size, Device::PinnedScratchMemoryPool);
 		memcpy(labels_pinned, labels.data(), size);
@@ -604,7 +637,14 @@ private:
 	int *labels_data_;
 };
 
-template class CrossEntropyNode<void, GPU>;
+template<typename Dummy>
+struct CrossEntropyNodeFactory<Dummy, GPU> {
+	Node *Create(Graph *graph, int node, const std::vector<int> &labels) {
+		return new CrossEntropyNodeGPU(graph, node, labels);
+	}
+};
+
+template class CrossEntropyNodeFactory<void, GPU>;
 
 static __global__ void ClassificationAccuracyKernel(const float *input, const int *expected, float *output,
 	int batch_size, int size) {
@@ -626,10 +666,9 @@ static __global__ void ClassificationAccuracyKernel(const float *input, const in
 	}
 }
 
-template<typename Dummy>
-class ClassificationAccuracyNode<Dummy, GPU> : public Node {
+class ClassificationAccuracyNodeGPU : public Node {
 public:
-	ClassificationAccuracyNode(Graph *graph, int node, const std::vector<int> &labels) : Node{ node } {
+	ClassificationAccuracyNodeGPU(Graph *graph, int node, const std::vector<int> &labels) : Node{ node } {
 		int size = (int)labels.size() * sizeof(int);
 		int *labels_pinned = (int*)graph->GetDevice()->AllocateMemory(size, Device::PinnedScratchMemoryPool);
 		memcpy(labels_pinned, labels.data(), size);
@@ -667,4 +706,11 @@ private:
 	int *labels_data_;
 };
 
-template class ClassificationAccuracyNode<void, GPU>;
+template<typename Dummy>
+struct ClassificationAccuracyNodeFactory<Dummy, GPU> {
+	Node *Create(Graph *graph, int node, const std::vector<int> &labels) {
+		return new ClassificationAccuracyNodeGPU(graph, node, labels);
+	}
+};
+
+template class ClassificationAccuracyNodeFactory<void, GPU>;

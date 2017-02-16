@@ -31,15 +31,15 @@ void Expression::Backward() const {
 	return graph_->Backward(*this);
 }
 
-template<template<typename, DeviceType> typename NodeType, typename... TArg>
+template<template<typename, DeviceType> typename FactoryType, typename... TArg>
 static Expression CreateDeviceSpecificNode(Graph *graph, TArg&&... arg) {
 	Node *node;
 #ifdef USE_CUDA
 	if (graph->GetDeviceType() == GPU)
-		node = new NodeType<void, GPU>(std::forward<TArg>(arg)...);
+		node = FactoryType<void, GPU>().Create(std::forward<TArg>(arg)...);
 	else
 #endif
-		node = new NodeType<void, CPU>(std::forward<TArg>(arg)...);
+		node = FactoryType<void, CPU>().Create(std::forward<TArg>(arg)...);
 	return graph->AddNode(node);
 }
 
@@ -161,9 +161,9 @@ Expression BatchSparseVectorInput(Graph *graph, int batch_size, const Shape &sha
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
-class BinaryOpNode<CPU, ForwardFunc, BackwardFunc> : public Node {
+class BinaryOpNodeCPU : public Node {
 public:
-	BinaryOpNode(int lhs_node, int rhs_node) : Node{ lhs_node, rhs_node } {}
+	BinaryOpNodeCPU(int lhs_node, int rhs_node) : Node{ lhs_node, rhs_node } {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		const Shape &lhs_shape = x_shapes[0];
@@ -257,15 +257,22 @@ public:
 };
 
 template<typename ForwardFunc, typename BackwardFunc>
+struct BinaryOpNodeFactory<CPU, ForwardFunc, BackwardFunc> {
+	Node *Create(int lhs_node, int rhs_node) {
+		return new BinaryOpNodeCPU<ForwardFunc, BackwardFunc>(lhs_node, rhs_node);
+	}
+};
+
+template<typename ForwardFunc, typename BackwardFunc>
 static Expression CreateBinaryOpNode(const Expression &lhs, const Expression &rhs) {
 	Graph *graph = lhs.GetGraph();
 	Node *node;
 #ifdef USE_CUDA
 	if (graph->GetDeviceType() == GPU)
-		node = new BinaryOpNode<GPU, ForwardFunc, BackwardFunc>(lhs.GetNodeIndex(), rhs.GetNodeIndex());
+		node = BinaryOpNodeFactory<GPU, ForwardFunc, BackwardFunc>().Create(lhs.GetNodeIndex(), rhs.GetNodeIndex());
 	else
 #endif
-		node = new BinaryOpNode<CPU, ForwardFunc, BackwardFunc>(lhs.GetNodeIndex(), rhs.GetNodeIndex());
+		node = BinaryOpNodeFactory<CPU, ForwardFunc, BackwardFunc>().Create(lhs.GetNodeIndex(), rhs.GetNodeIndex());
 	return graph->AddNode(node);
 }
 
@@ -287,9 +294,9 @@ Expression operator/(const Expression &lhs, const Expression &rhs) {
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
-class BinaryLeftScalarOpNode<CPU, ForwardFunc, BackwardFunc> : public Node {
+class BinaryLeftScalarOpNodeCPU : public Node {
 public:
-	BinaryLeftScalarOpNode(float lhs_scalar, int rhs_node) : Node{ rhs_node }, lhs_scalar_(lhs_scalar) {}
+	BinaryLeftScalarOpNodeCPU(float lhs_scalar, int rhs_node) : Node{ rhs_node }, lhs_scalar_(lhs_scalar) {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		return x_shapes[0];
@@ -326,15 +333,22 @@ private:
 };
 
 template<typename ForwardFunc, typename BackwardFunc>
+struct BinaryLeftScalarOpNodeFactory<CPU, ForwardFunc, BackwardFunc> {
+	Node *Create(float lhs_scalar, int rhs_node) {
+		return new BinaryLeftScalarOpNodeCPU<ForwardFunc, BackwardFunc>(lhs_scalar, rhs_node);
+	}
+};
+
+template<typename ForwardFunc, typename BackwardFunc>
 static Expression CreateBinaryLeftScalarOpNode(float lhs_scalar, const Expression &rhs) {
 	Graph *graph = rhs.GetGraph();
 	Node *node;
 #ifdef USE_CUDA
 	if (graph->GetDeviceType() == GPU)
-		node = new BinaryLeftScalarOpNode<GPU, ForwardFunc, BackwardFunc>(lhs_scalar, rhs.GetNodeIndex());
+		node = BinaryLeftScalarOpNodeFactory<GPU, ForwardFunc, BackwardFunc>().Create(lhs_scalar, rhs.GetNodeIndex());
 	else
 #endif
-		node = new BinaryLeftScalarOpNode<CPU, ForwardFunc, BackwardFunc>(lhs_scalar, rhs.GetNodeIndex());
+		node = BinaryLeftScalarOpNodeFactory<CPU, ForwardFunc, BackwardFunc>().Create(lhs_scalar, rhs.GetNodeIndex());
 	return graph->AddNode(node);
 }
 
@@ -355,9 +369,9 @@ Expression operator/(float lhs, const Expression &rhs) {
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
-class BinaryRightScalarOpNode<CPU, ForwardFunc, BackwardFunc> : public Node {
+class BinaryRightScalarOpNodeCPU : public Node {
 public:
-	BinaryRightScalarOpNode(int lhs_node, float rhs_scalar) : Node{ lhs_node }, rhs_scalar_(rhs_scalar) {}
+	BinaryRightScalarOpNodeCPU(int lhs_node, float rhs_scalar) : Node{ lhs_node }, rhs_scalar_(rhs_scalar) {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		return x_shapes[0];
@@ -394,15 +408,22 @@ private:
 };
 
 template<typename ForwardFunc, typename BackwardFunc>
+struct BinaryRightScalarOpNodeFactory<CPU, ForwardFunc, BackwardFunc> {
+	Node *Create(int lhs_node, float rhs_scalar) {
+		return new BinaryRightScalarOpNodeCPU<ForwardFunc, BackwardFunc>(lhs_node, rhs_scalar);
+	}
+};
+
+template<typename ForwardFunc, typename BackwardFunc>
 static Expression CreateBinaryRightScalarOpNode(const Expression &lhs, float rhs_scalar) {
 	Graph *graph = lhs.GetGraph();
 	Node *node;
 #ifdef USE_CUDA
 	if (graph->GetDeviceType() == GPU)
-		node = new BinaryRightScalarOpNode<GPU, ForwardFunc, BackwardFunc>(lhs.GetNodeIndex(), rhs_scalar);
+		node = BinaryRightScalarOpNodeFactory<GPU, ForwardFunc, BackwardFunc>().Create(lhs.GetNodeIndex(), rhs_scalar);
 	else
 #endif
-		node = new BinaryRightScalarOpNode<CPU, ForwardFunc, BackwardFunc>(lhs.GetNodeIndex(), rhs_scalar);
+		node = BinaryRightScalarOpNodeFactory<CPU, ForwardFunc, BackwardFunc>().Create(lhs.GetNodeIndex(), rhs_scalar);
 	return graph->AddNode(node);
 }
 
@@ -423,9 +444,9 @@ Expression operator/(const Expression &lhs, float rhs) {
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
-class UnaryOpNode<CPU, ForwardFunc, BackwardFunc> : public Node {
+class UnaryOpNodeCPU : public Node {
 public:
-	UnaryOpNode(int node) : Node{ node } {}
+	UnaryOpNodeCPU(int node) : Node{ node } {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		return x_shapes[0];
@@ -455,15 +476,22 @@ public:
 };
 
 template<typename ForwardFunc, typename BackwardFunc>
+struct UnaryOpNodeFactory<CPU, ForwardFunc, BackwardFunc> {
+	Node *Create(int node) {
+		return new UnaryOpNodeCPU<ForwardFunc, BackwardFunc>(node);
+	}
+};
+
+template<typename ForwardFunc, typename BackwardFunc>
 static Expression CreateUnaryOpNode(const Expression &x) {
 	Graph *graph = x.GetGraph();
 	Node *node;
 #ifdef USE_CUDA
 	if (graph->GetDeviceType() == GPU)
-		node = new UnaryOpNode<GPU, ForwardFunc, BackwardFunc>(x.GetNodeIndex());
+		node = UnaryOpNodeFactory<GPU, ForwardFunc, BackwardFunc>().Create(x.GetNodeIndex());
 	else
 #endif
-		node = new UnaryOpNode<CPU, ForwardFunc, BackwardFunc>(x.GetNodeIndex());
+		node = UnaryOpNodeFactory<CPU, ForwardFunc, BackwardFunc>().Create(x.GetNodeIndex());
 	return graph->AddNode(node);
 }
 
@@ -1106,10 +1134,9 @@ Expression Reshape(const Expression &x, const Shape &shape) {
 	return graph->AddNode(new ReshapeNode(x.GetNodeIndex(), shape));
 }
 
-template<typename Dummy>
-class SoftmaxNode<Dummy, CPU> : public Node {
+class SoftmaxNodeCPU : public Node {
 public:
-	SoftmaxNode(int node) : Node{ node } {}
+	SoftmaxNodeCPU(int node) : Node{ node } {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		return x_shapes[0];
@@ -1167,9 +1194,16 @@ public:
 	}
 };
 
+template<typename Dummy>
+struct SoftmaxNodeFactory<Dummy, CPU> {
+	Node *Create(int node) {
+		return new SoftmaxNodeCPU(node);
+	}
+};
+
 Expression Softmax(const Expression &x) {
 	Graph *graph = x.GetGraph();
-	return CreateDeviceSpecificNode<SoftmaxNode>(graph, x.GetNodeIndex());
+	return CreateDeviceSpecificNode<SoftmaxNodeFactory>(graph, x.GetNodeIndex());
 }
 
 Expression SoftMargin(const Expression &x, const Expression &label) {
@@ -1184,10 +1218,9 @@ Expression BinaryClassificationAccuracy(const Expression &x, const Expression &l
 	return CreateBinaryOpNode<BinaryClassificationAccuracyForward, BinaryNoBackward>(x, label);
 }
 
-template<typename Dummy>
-class CrossEntropyNode<Dummy, CPU> : public Node {
+class CrossEntropyNodeCPU : public Node {
 public:
-	CrossEntropyNode(Graph *graph, int node, const std::vector<int> &labels) : Node{ node }, labels_(labels) {}
+	CrossEntropyNodeCPU(Graph *graph, int node, const std::vector<int> &labels) : Node{ node }, labels_(labels) {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		Shape shape = x_shapes[0];
@@ -1232,18 +1265,24 @@ private:
 	std::vector<int> labels_;
 };
 
+template<typename Dummy>
+struct CrossEntropyNodeFactory<Dummy, CPU> {
+	Node *Create(Graph *graph, int node, const std::vector<int> &labels) {
+		return new CrossEntropyNodeCPU(graph, node, labels);
+	}
+};
+
 Expression CrossEntropy(const Expression &x, int size, const int *labels) {
 	Graph *graph = x.GetGraph();
 	std::vector<int> l;
 	for (int i = 0; i < size; i++)
 		l.push_back(labels[i]);
-	return CreateDeviceSpecificNode<CrossEntropyNode>(graph, graph, x.GetNodeIndex(), l);
+	return CreateDeviceSpecificNode<CrossEntropyNodeFactory>(graph, graph, x.GetNodeIndex(), l);
 }
 
-template<typename Dummy>
-class ClassificationAccuracyNode<Dummy, CPU> : public Node {
+class ClassificationAccuracyNodeCPU : public Node {
 public:
-	ClassificationAccuracyNode(Graph *graph, int node, const std::vector<int> &labels) : Node{ node }, labels_(labels) {}
+	ClassificationAccuracyNodeCPU(Graph *graph, int node, const std::vector<int> &labels) : Node{ node }, labels_(labels) {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		Shape shape = x_shapes[0];
@@ -1283,10 +1322,17 @@ private:
 	std::vector<int> labels_;
 };
 
+template<typename Dummy>
+struct ClassificationAccuracyNodeFactory<Dummy, CPU> {
+	Node *Create(Graph *graph, int node, const std::vector<int> &labels) {
+		return new ClassificationAccuracyNodeCPU(graph, node, labels);
+	}
+};
+
 Expression ClassificationAccuracy(const Expression &x, int size, const int *labels) {
 	Graph *graph = x.GetGraph();
 	std::vector<int> l;
 	for (int i = 0; i < size; i++)
 		l.push_back(labels[i]);
-	return CreateDeviceSpecificNode<ClassificationAccuracyNode>(graph, graph, x.GetNodeIndex(), l);
+	return CreateDeviceSpecificNode<ClassificationAccuracyNodeFactory>(graph, graph, x.GetNodeIndex(), l);
 }
