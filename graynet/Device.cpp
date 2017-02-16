@@ -45,13 +45,18 @@ public:
 
 	void *AllocateMemory(int size) {
 		const size_t kAlignment = 16;
-		size_t current = ALIGN_TO(pools_.back().current, kAlignment);
-		if (current + size > pools_.back().capacity) {
-			AllocateNewPool(size);
-			current = 0;
+		// TODO: Performance improvement
+		for (Pool &pool : pools_) {
+			size_t current = ALIGN_TO(pool.current, kAlignment);
+			if (current + size <= pool.capacity) {
+				void *ptr = (char *)pool.start_ptr + current;
+				pool.current = current + size;
+				return ptr;
+			}
 		}
-		void *ptr = (char *)pools_.back().start_ptr + current;
-		pools_.back().current = current + size;
+		AllocateNewPool(size);
+		void *ptr = (char *)pools_.back().start_ptr;
+		pools_.back().current = size;
 		return ptr;
 	}
 
