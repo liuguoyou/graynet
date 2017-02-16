@@ -164,6 +164,9 @@ Expression AvgPooling(const Expression &x, const Shape &filter_shape, const Shap
 /*! Reshape tensor */
 Expression Reshape(const Expression &x, const Shape &shape);
 
+/*! Reduce one dimension */
+Expression ReduceSum(const Expression &x);
+
 /*! Softmax function over the last dimension: y = exp(x_i) / sum(exp(x_i)) */
 Expression Softmax(const Expression &x);
 

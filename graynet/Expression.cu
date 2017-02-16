@@ -92,6 +92,32 @@ static __global__ void TransformReduceKernel(TransformFunc transform_func, Reduc
 		store_func(base_idx, result, extra_data);
 }
 
+static void GetReduceDims(int dims, const int *from_dims, const int *to_dims,
+	int *regular_total, int *reduce_total,
+	int regular_sizes[kMaxTensorDim + 1], int reduce_sizes[kMaxTensorDim + 1], int strides[kMaxTensorDim + 1]) {
+	int regular_tot = 1, reduce_tot = 1;
+	int tot = 1;
+	for (int i = dims - 1; i >= 0; i--) {
+		int from_dim = from_dims[i], to_dim = to_dims[i];
+		strides[i] = tot;
+		regular_sizes[i] = regular_tot;
+		reduce_sizes[i] = reduce_tot;
+		tot *= from_dim;
+		if (from_dim == to_dim) {
+			// Regular dimension
+			regular_tot *= from_dim;
+		}
+		else if (to_dim == 1) {
+			// Reduce dimension
+			reduce_tot *= from_dim;
+		}
+		else // Invalid reduction operation
+			DEBUG_BREAK();
+	}
+	*regular_total = regular_tot;
+	*reduce_total = reduce_tot;
+}
+
 template<typename TransformFunc, typename ReduceFunc, typename StoreFunc, typename ExtraData>
 static void TransformReduce(TransformFunc transform_func, ReduceFunc reduce_func, StoreFunc store_func,
 	int dims, int regular_total, int regular_sizes[kMaxTensorDim + 1],
@@ -145,31 +171,11 @@ static void GetTensorStrides(const Tensor *tensor, int strides[kMaxTensorDim + 1
 	strides[0] = (batch_size == 1) ? 0 : cur;
 }
 
-template<typename DimFunc>
-static void GetReduceDims(DimFunc dim_func, int dims, int *regular_total, int *reduce_total,
-	int regular_sizes[kMaxTensorDim + 1], int reduce_sizes[kMaxTensorDim + 1], int strides[kMaxTensorDim + 1]) {
-	int regular_tot = 1, reduce_tot = 1;
-	int tot = 1;
-	for (int i = dims - 1; i >= 0; i--) {
-		std::pair<int, int> dim_desc = dim_func(i);
-		int from_dim = dim_desc.first, to_dim = dim_desc.second;
-		strides[i] = tot;
-		regular_sizes[i] = regular_tot;
-		reduce_sizes[i] = reduce_tot;
-		tot *= from_dim;
-		if (from_dim == to_dim) {
-			// Regular dimension
-			regular_tot *= from_dim;
-		}
-		else if (to_dim == 1) {
-			// Reduce dimension
-			reduce_tot *= from_dim;
-		}
-		else // Invalid reduction operation
-			DEBUG_BREAK();
-	}
-	*regular_total = regular_tot;
-	*reduce_total = reduce_tot;
+static void GetTensorDims(const Tensor *tensor, int dims[kMaxTensorDim + 1]) {
+	dims[0] = tensor->GetBatchSize();
+	const Shape &shape = tensor->GetShape();
+	for (int i = 0; i < shape.GetDimCount(); i++)
+		dims[i + 1] = shape.GetDim(i);
 }
 
 struct BinaryReduceDesc {
@@ -221,7 +227,7 @@ public:
 
 		int threadsPerBlock = kThreadsPerBlock;
 		int blocksPerGrid = (nelems + threadsPerBlock - 1) / threadsPerBlock;
-		BinaryForwardKernel<ForwardFunc> << <blocksPerGrid, threadsPerBlock >> > (
+		BinaryForwardKernel<ForwardFunc><<<blocksPerGrid, threadsPerBlock>>>(
 			lhs_data, rhs_data, y_data, nelems, ndims, forward);
 		CUDA_CALL(cudaGetLastError());
 	}
@@ -240,6 +246,12 @@ public:
 		const Shape &y_shape = y->GetShape();
 		int ndims = 1 + y_shape.GetDimCount();
 
+		int lhs_dims[kMaxTensorDim + 1], rhs_dims[kMaxTensorDim + 1];
+		int y_dims[kMaxTensorDim + 1];
+		GetTensorDims(x[0], lhs_dims);
+		GetTensorDims(x[1], rhs_dims);
+		GetTensorDims(y, y_dims);
+
 		int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
 		GetTensorStrides(x[0], lhs_strides);
 		GetTensorStrides(x[1], rhs_strides);
@@ -251,10 +263,8 @@ public:
 
 		/* LHS */
 		{
-			GetReduceDims([&](int dim) {
-				return dim == 0 ? std::make_pair(y->GetBatchSize(), x[0]->GetBatchSize())
-					: std::make_pair(y_shape.GetDim(dim - 1), lhs_shape.GetDim(dim - 1));
-			}, ndims, &regular_total, &reduce_total, regular_sizes, reduce_sizes, strides);
+			GetReduceDims(ndims, y_dims, lhs_dims, 
+				&regular_total, &reduce_total, regular_sizes, reduce_sizes, strides);
 
 			memcpy(&desc.lhs_strides, lhs_strides, sizeof(desc.lhs_strides));
 			memcpy(&desc.rhs_strides, rhs_strides, sizeof(desc.rhs_strides));
@@ -276,10 +286,8 @@ public:
 
 		/* RHS */
 		{
-			GetReduceDims([&](int dim) {
-				return dim == 0 ? std::make_pair(y->GetBatchSize(), x[1]->GetBatchSize())
-					: std::make_pair(y_shape.GetDim(dim - 1), rhs_shape.GetDim(dim - 1));
-			}, ndims, &regular_total, &reduce_total, regular_sizes, reduce_sizes, strides);
+			GetReduceDims(ndims, y_dims, rhs_dims,
+				&regular_total, &reduce_total, regular_sizes, reduce_sizes, strides);
 
 			auto transform_func = [=] __device__(int index, const BinaryReduceDesc &desc) {
 				int lhs_index = GetTensorStorageIndex(index, ndims, desc.strides, desc.lhs_strides);
@@ -509,6 +517,74 @@ INSTANTIATE_BINARY_LEFT_SCALAR_OPS(GPU)
 INSTANTIATE_BINARY_RIGHT_SCALAR_OPS(GPU)
 INSTANTIATE_UNARY_OPS(GPU)
 
+struct Empty {};
+
+static __global__ void ReduceSumBackwardKernel(int nelems, int size,
+	const float *dEdY, float *dEdX) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < nelems) {
+		dEdX[i] = dEdY[i / size];
+	}
+}
+
+class ReduceSumNodeGPU : public Node {
+public:
+	ReduceSumNodeGPU(int node) : Node{ node } {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		return Shape(1);
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const float *x_data = (float*)x[0]->GetData();
+		float *y_data = (float*)y->GetData();
+
+		int size = x[0]->GetShape().GetSize();
+		int x_dims[kMaxTensorDim + 1], y_dims[kMaxTensorDim + 1];
+		x_dims[0] = x[0]->GetBatchSize();
+		x_dims[1] = x[0]->GetShape().GetSize();
+		y_dims[0] = x[0]->GetBatchSize();
+		y_dims[1] = 1;
+		int regular_total, reduce_total;
+		int regular_sizes[kMaxTensorDim + 1], reduce_sizes[kMaxTensorDim + 1];
+		int strides[kMaxTensorDim + 1];
+		GetReduceDims(2, x_dims, y_dims, &regular_total, &reduce_total,
+			regular_sizes, reduce_sizes, strides);
+
+		auto transform_func = [=] __device__ (int index, Empty) {
+			return x_data[index];
+		};
+		auto store_func = [=] __device__ (int index, float value, Empty) {
+			y_data[index / size] = value;
+		};
+		TransformReduce(transform_func, cub::Sum(), store_func, 2,
+			regular_total, regular_sizes, reduce_total, reduce_sizes, strides, Empty());
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *dEdY_data = (float*)dEdY->GetData();
+		float *dEdX_data = (float*)dEdX[0]->GetData();
+
+		int size = x[0]->GetShape().GetSize();
+		int batch_size = x[0]->GetBatchSize();
+
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (batch_size + threadsPerBlock - 1) / threadsPerBlock;
+		ReduceSumBackwardKernel<<<blocksPerGrid, threadsPerBlock>>>(
+			batch_size * size, size, dEdY_data, dEdX_data);
+	}
+};
+
+template<typename Dummy>
+struct ReduceSumNodeFactory<Dummy, GPU> {
+	Node *Create(int node) {
+		return new ReduceSumNodeGPU(node);
+	}
+};
+
+template struct ReduceSumNodeFactory<void, GPU>;
+
 class SoftmaxNodeGPU : public Node {
 public:
 	SoftmaxNodeGPU(int node) : Node{ node } {}
@@ -565,7 +641,7 @@ struct SoftmaxNodeFactory<Dummy, GPU> {
 	}
 };
 
-template class SoftmaxNodeFactory<void, GPU>;
+template struct SoftmaxNodeFactory<void, GPU>;
 
 static __global__ void CrossEntropyForward(const float *x, float *y, const int *labels, int N, int dim_size) {
 	// y = -log(x_k)
@@ -644,7 +720,7 @@ struct CrossEntropyNodeFactory<Dummy, GPU> {
 	}
 };
 
-template class CrossEntropyNodeFactory<void, GPU>;
+template struct CrossEntropyNodeFactory<void, GPU>;
 
 static __global__ void ClassificationAccuracyKernel(const float *input, const int *expected, float *output,
 	int batch_size, int size) {
@@ -713,4 +789,4 @@ struct ClassificationAccuracyNodeFactory<Dummy, GPU> {
 	}
 };
 
-template class ClassificationAccuracyNodeFactory<void, GPU>;
+template struct ClassificationAccuracyNodeFactory<void, GPU>;

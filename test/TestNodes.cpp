@@ -260,6 +260,32 @@ TEST_F(NodeTest, Reshape) {
 	CheckGradient(x);
 }
 
+TEST_F(NodeTest, ReduceSum1D) {
+	const float x_data[] = {
+		0.1f, 0.2f, 0.3f,
+	};
+	Expression x = graph.AddParameter(Shape(3), x_data);
+	x = ReduceSum(x);
+	const float expected[] = { 0.6f };
+	CheckValue(x, expected);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, ReduceSumBatched1D) {
+	const float x_data[] = {
+		0.1f, 0.2f, 0.3f,
+		0.4f, 0.5f, 0.6f,
+	};
+	Expression x = BatchInput(&graph, 2, Shape(3), x_data);
+	x = ReduceSum(x);
+	const float expected[] = {
+		0.6f,
+		1.5f,
+	};
+	CheckValue(x, expected);
+	CheckGradient(x);
+}
+
 TEST_F(NodeTest, ConvolutionSimple) {
 	const float x_data[] = {
 		0.1f, 0.2f, 0.3f,

@@ -1147,12 +1147,57 @@ public:
 
 private:
 	Shape shape_;
-	int node_;
 };
 
 Expression Reshape(const Expression &x, const Shape &shape) {
 	Graph *graph = x.GetGraph();
 	return graph->AddNode(new ReshapeNode(x.GetNodeIndex(), shape));
+}
+
+class ReduceSumNodeCPU : public Node {
+public:
+	ReduceSumNodeCPU(int node) : Node{ node } {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		return Shape(1);
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const float *x_data = (float*)x[0]->GetData();
+		float *y_data = (float*)y->GetData();
+		
+		int size = x[0]->GetShape().GetSize();
+		int batch_size = x[0]->GetBatchSize();
+		for (int batch_id = 0; batch_id < batch_size; batch_id++) {
+			float sum = 0;
+			for (int i = 0; i < size; i++)
+				sum += x_data[batch_id * size + i];
+			y_data[batch_id] = sum;
+		}
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *dEdY_data = (float*)dEdY->GetData();
+		float *dEdX_data = (float*)dEdX[0]->GetData();
+		int size = x[0]->GetShape().GetSize();
+		int batch_size = x[0]->GetBatchSize();
+		for (int batch_id = 0; batch_id < batch_size; batch_id++)
+			for (int i = 0; i < size; i++)
+				dEdX_data[batch_id * size + i] = dEdY_data[batch_id];
+	}
+};
+
+template<typename Dummy>
+struct ReduceSumNodeFactory<Dummy, CPU> {
+	Node *Create(int node) {
+		return new ReduceSumNodeCPU(node);
+	}
+};
+
+Expression ReduceSum(const Expression &x) {
+	Graph *graph = x.GetGraph();
+	return CreateDeviceSpecificNode<ReduceSumNodeFactory>(graph, x.GetNodeIndex());
 }
 
 class SoftmaxNodeCPU : public Node {

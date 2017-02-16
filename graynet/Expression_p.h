@@ -31,6 +31,11 @@ struct UnaryOpNodeFactory {
 };
 
 template<typename Dummy, DeviceType DeviceType>
+struct ReduceSumNodeFactory {
+	Node *Create(int node);
+};
+
+template<typename Dummy, DeviceType DeviceType>
 struct SoftmaxNodeFactory {
 	Node *Create(int node);
 };
