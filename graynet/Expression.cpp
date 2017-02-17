@@ -1200,9 +1200,9 @@ Expression ReduceSum(const Expression &x) {
 	return CreateDeviceSpecificNode<ReduceSumNodeFactory>(graph, x.GetNodeIndex());
 }
 
-class SliceNode : public Node {
+class SliceNodeCPU : public Node {
 public:
-	SliceNode(int node, const Shape &start, const Shape &size) : Node{ node }, start_(start), size_(size) {}
+	SliceNodeCPU(int node, const Shape &start, const Shape &size) : Node{ node }, start_(start), size_(size) {}
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		if (start_.GetDimCount() != 1 || size_.GetDimCount() != 1)
@@ -1224,24 +1224,22 @@ public:
 		float *dEdX_data = dEdX[0]->GetData();
 		int count = size_.GetDim(0);
 		float *ptr = dEdX_data + start_.GetDim(0);
-#ifdef USE_CUDA
-		if (graph->GetDeviceType() == GPU) {
-			float alpha = 1.f;
-			cublasSaxpy_v2(graph->GetDevice()->GetCuBLASHandle(), count,
-				&alpha, dEdY_data, 1, ptr, 1);
-		}
-		else
-#endif
-			cblas_saxpy(count, 1.f, dEdY_data, 1, ptr, 1);
+		cblas_saxpy(count, 1.f, dEdY_data, 1, ptr, 1);
 	}
 
 private:
 	Shape start_, size_;
 };
 
+template<typename Dummy>
+struct SliceNodeFactory<Dummy, CPU> {
+	Node *Create(int node, const Shape &start, const Shape &size) {
+		return new SliceNodeCPU(node, start, size);
+	}
+};
+
 Expression Slice(const Expression &x, const Shape &start, const Shape &size) {
-	Graph *graph = x.GetGraph();
-	return graph->AddNode(new SliceNode(x.GetNodeIndex(), start, size));
+	return CreateDeviceSpecificNode<SliceNodeFactory>(x.GetGraph(), x.GetNodeIndex(), start, size);
 }
 
 class SoftmaxNodeCPU : public Node {

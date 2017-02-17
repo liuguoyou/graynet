@@ -585,6 +585,86 @@ struct ReduceSumNodeFactory<Dummy, GPU> {
 
 template struct ReduceSumNodeFactory<void, GPU>;
 
+struct SliceDesc {
+	int elems[kMaxTensorDim + 1], strides[kMaxTensorDim + 1];
+};
+
+static __global__ void SliceForwardKernel(int count, int base_index, int ndims, SliceDesc desc,
+	const float *x, float *y) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < count) {
+		int index = base_index + GetTensorStorageIndex(i, ndims, desc.elems, desc.strides);
+		y[i] = x[index];
+	}
+}
+
+static __global__ void SliceBackwardKernel(int count, int base_index, int ndims, SliceDesc desc,
+	const float *dEdY, float *dEdX) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < count) {
+		int index = base_index + GetTensorStorageIndex(i, ndims, desc.elems, desc.strides);
+		dEdX[index] += dEdY[i];
+	}
+}
+
+class SliceNodeGPU : public Node {
+public:
+	SliceNodeGPU(int node, const Shape &start, const Shape &size) : Node{ node }, start_(start), size_(size) {}
+
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
+		const Shape &shape = x_shapes[0];
+		if (start_.GetDimCount() != size_.GetDimCount())
+			abort();
+		for (int i = 0; i < start_.GetDimCount(); i++) {
+			if (start_.GetDim(i) < 0 || start_.GetDim(i) >= shape.GetDim(i))
+				abort();
+			if (start_.GetDim(i) + size_.GetDim(i) > shape.GetDim(i))
+				abort();
+		}
+		return size_;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		int ndims = x[0]->GetShape().GetDimCount() + 1;
+		GetTensorStrides(x[0], desc_.strides);
+		base_index_ = 0;
+		for (int i = 1; i < ndims; i++)
+			base_index_ += desc_.strides[i] * start_.GetDim(i - 1);
+		desc_.elems[ndims - 1] = 1;
+		for (int i = ndims - 2; i >= 0; i--)
+			desc_.elems[i] = desc_.elems[i + 1] * size_.GetDim(i);
+		count_ = desc_.elems[0] * x[0]->GetBatchSize();
+
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (count_ + threadsPerBlock - 1) / threadsPerBlock;
+		SliceForwardKernel<<<blocksPerGrid, threadsPerBlock>>>(count_, base_index_, ndims,
+			desc_, x[0]->GetData(), y->GetData());
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		int ndims = x[0]->GetShape().GetDimCount() + 1;
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (count_ + threadsPerBlock - 1) / threadsPerBlock;
+		SliceBackwardKernel<<<blocksPerGrid, threadsPerBlock>>>(count_, base_index_, ndims,
+			desc_, dEdY->GetData(), dEdX[0]->GetData());
+	}
+
+private:
+	Shape start_, size_;
+	mutable SliceDesc desc_;
+	mutable int count_, base_index_;
+};
+
+template<typename Dummy>
+struct SliceNodeFactory<Dummy, GPU> {
+	Node *Create(int node, const Shape &start, const Shape &size) {
+		return new SliceNodeGPU(node, start, size);
+	}
+};
+
+template struct SliceNodeFactory<void, GPU>;
+
 class SoftmaxNodeGPU : public Node {
 public:
 	SoftmaxNodeGPU(int node) : Node{ node } {}

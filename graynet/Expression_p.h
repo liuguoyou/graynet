@@ -38,6 +38,11 @@ struct ReduceSumNodeFactory {
 };
 
 template<typename Dummy, DeviceType DeviceType>
+struct SliceNodeFactory {
+	Node *Create(int node, const Shape &start, const Shape &size);
+};
+
+template<typename Dummy, DeviceType DeviceType>
 struct SoftmaxNodeFactory {
 	Node *Create(int node);
 };

@@ -300,6 +300,23 @@ TEST_F(NodeTest, Slice1D) {
 	CheckGradient(x);
 }
 
+TEST_F(NodeTest, Slice2D) {
+	const float x_data[] = {
+		0.1f, 0.2f, 0.3f, 0.4f,
+		-0.1f, -0.2f, -0.3f, -0.4f,
+		0.5f, 0.6f, 0.7f, 0.8f,
+	};
+	Expression x = graph.AddParameter(Shape(3, 4), x_data);
+	x = Slice(x, Shape(1, 1), Shape(2, 3));
+	const float expected[] = {
+		-0.2f, -0.3f, -0.4f,
+		0.6f, 0.7f, 0.8f,
+	};
+	CheckValue(x, expected);
+	x = ReduceSum(x);
+	CheckGradient(x);
+}
+
 TEST_F(NodeTest, ConvolutionSimple) {
 	const float x_data[] = {
 		0.1f, 0.2f, 0.3f,
