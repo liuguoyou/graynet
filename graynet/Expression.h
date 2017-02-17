@@ -211,14 +211,14 @@ Expression Slice(const Expression &x, const Shape &start, const Shape &size);
 /*! Softmax function over the last dimension: \f$ y = \frac{e^{x_i}}{\sum{e^{x_i}}} \f$ */
 Expression Softmax(const Expression &x);
 
-/*! Soft margin (logistic) loss. \n
- * \f$ y = \ln(1 + e^{-label*x}) \f$ \n
+/*! Soft margin (logistic) loss: \f$ y = \ln(1 + e^{-label*x}) \f$
+ *
  * \f$ label \f$ must be -1 or 1.
  */
 Expression SoftMargin(const Expression &x, const Expression &label);
 
-/*! Binary cross entropy loss. \n
- * \f$ y = -label*\ln(x) - (1-label)*\ln(1-x) \f$ \n
+/*! Binary cross entropy loss: \f$ y = -label*\ln(x) - (1-label)*\ln(1-x) \f$
+ *
  * \f$ label \f$ must be 0 or 1.
  */
 Expression BinaryCrossEntropy(const Expression &x, const Expression &label);

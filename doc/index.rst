@@ -14,6 +14,7 @@ A complete reference of all GrayNet's functionalities is shown below:
    :maxdepth: 2
 
    operations
+   optimizers
 
 Indices and tables
 ==================
