@@ -102,9 +102,10 @@ int main() {
 
 	//SGDOptimizer optimizer(&graph, 0.01f);
 	//AdaGradOptimizer optimizer(&graph);
-	RmsPropOptimizer optimizer(&graph);
+	//RmsPropOptimizer optimizer(&graph);
+	AdamOptimizer optimizer(&graph);
 
-	int batch_size = 32;
+	int batch_size = 20;
 	float loss = 0, accuracy = 0;
 
 	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();

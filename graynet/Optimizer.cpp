@@ -114,7 +114,7 @@ void Optimizer::UpdateCallback(const std::vector<Tensor> &parameters,
 		for (size_t i = d->extras_.size(); i < parameters.size(); i++) {
 			int batch_size = parameters[i].GetBatchSize();
 			const Shape &shape = parameters[i].GetShape();
-			int size = batch_size * shape.GetSize() * sizeof(float);
+			int size = extras_count * batch_size * shape.GetSize() * sizeof(float);
 			Device *device = d->graph_->GetDevice();
 
 			float *data = (float *)device->AllocateMemory(size, Device::PermanentMemoryPool);
@@ -217,3 +217,60 @@ void RmsPropOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
 	}
 }
 
+struct AdamUpdateM {
+	float beta1;
+
+	__host__ __device__ float operator()(float m, float grad) {
+		return beta1 * m + (1 - beta1) * grad;
+	}
+};
+
+struct AdamUpdateV {
+	float beta2;
+
+	__host__ __device__ float operator()(float v, float grad) {
+		return beta2 * v + (1 - beta2) * grad * grad;
+	}
+};
+
+struct AdamUpdateParam {
+	float beta1_t, beta2_t, lr, epsilon;
+
+	__host__ __device__ float operator()(float param, float m, float v) {
+		float m_hat = m / (1 - beta1_t);
+		float v_hat = v / (1 - beta2_t);
+		float x = lr * m_hat / (sqrt(v_hat) + epsilon);
+		return param - lr * m_hat / (sqrt(v_hat) + epsilon);
+	}
+};
+
+AdamOptimizer::AdamOptimizer(Graph *graph, float initial_learning_rate,
+	float beta1, float beta2, float epsilon)
+	: Optimizer(graph), initial_learning_rate_(initial_learning_rate),
+	beta1_(beta1), beta2_(beta2), epsilon_(epsilon), beta1_t_(1.f), beta2_t_(1.f) {
+}
+
+int AdamOptimizer::GetExtraDataCount() const {
+	return 2;
+}
+
+void AdamOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
+	const std::vector<Tensor> &gradients,
+	const std::vector<Tensor> &extras) const {
+
+	beta1_t_ *= beta1_;
+	beta2_t_ *= beta2_;
+	for (int parameter_id = 0; parameter_id < (int)parameters.size(); parameter_id++) {
+		int size = parameters[parameter_id].GetShape().GetSize();
+		float *parameter_data = parameters[parameter_id].GetData();
+		float *gradient_data = gradients[parameter_id].GetData();
+		float *m_data = extras[parameter_id].GetData();
+		float *v_data = m_data + size;
+		Transform2(GetGraph()->GetDevice(), size, m_data, gradient_data, m_data,
+			AdamUpdateM{ beta1_ });
+		Transform2(GetGraph()->GetDevice(), size, v_data, gradient_data, v_data,
+			AdamUpdateV{ beta2_ });
+		Transform3(GetGraph()->GetDevice(), size, parameter_data, m_data, v_data,
+			parameter_data, AdamUpdateParam{ beta1_t_, beta2_t_, initial_learning_rate_, epsilon_ });
+	}
+}

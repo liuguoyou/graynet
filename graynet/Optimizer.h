@@ -44,7 +44,7 @@ private:
  * This optimizer uses a constant learning rate for every update, no momentum/learning rate decay
  * is supported.
  *
- * Update formula: \f[ w_{t+1} \leftarrow w_t - \eta\nabla{w_t} \f]
+ * Update formula: \f[ \theta_{t+1} \leftarrow \theta_t - \eta\nabla{\theta_t} \f]
  */
 class SGDOptimizer: public Optimizer {
 public:
@@ -69,12 +69,12 @@ private:
 	float learning_rate_;
 };
 
-/*! Adaptive gradient optimizer (AdaGrad).
+/*! Adaptive gradient (AdaGrad) optimizer.
  *
  * Update formula: \f[
- *  g_{t+1} \leftarrow g_t + {\nabla{w_t}}^2
+ *  g_{t+1} \leftarrow g_t + {\nabla{\theta_t}}^2
  * \f] \f[
- *  w_{t+1} \leftarrow w_t - \frac{\eta}{\sqrt{g_t+\epsilon}}\nabla{w_t}
+ *  \theta_{t+1} \leftarrow \theta_t - \frac{\eta}{\sqrt{g_t+\epsilon}}\nabla{\theta_t}
  * \f]
  */
 class AdaGradOptimizer : public Optimizer {
@@ -96,18 +96,18 @@ private:
 	float epsilon_;
 };
 
-/*! RmsProp optimizer
+/*! RmsProp optimizer.
  *
  * Update formula: \f[
- *  g_{t+1} \leftarrow \alpha g_t + (1-\alpha){\nabla{w_t}}^2
+ *  g_{t+1} \leftarrow \alpha g_t + (1-\alpha){\nabla{\theta_t}}^2
  * \f] \f[
- *  w_{t+1} \leftarrow w_t - \frac{\eta}{\sqrt{g_t+\epsilon}}\nabla{w_t}
+ *  \theta_{t+1} \leftarrow \theta_t - \frac{\eta}{\sqrt{g_t+\epsilon}}\nabla{\theta_t}
  * \f]
  */
 class RmsPropOptimizer : public Optimizer {
 public:
 	/*! Initialize an RmsPropOptimizer object.
-	 * \param initializer_learning_rate Specify the \f$ \eta \f$ parameter.
+	 * \param initial_learning_rate Specify the \f$ \eta \f$ parameter.
 	 * \param alpha Specify the \f$ \alpha \f$ parameter.
 	 * \param epsilon Specify the \f$ \epsilon \f$ parameter.
 	 */
@@ -124,6 +124,46 @@ protected:
 private:
 	float initial_learning_rate_;
 	float alpha_;
+	float epsilon_;
+};
+
+/*! Adaptive moment estimation (Adam) optimizer.
+ *
+ * Update formula: \f[
+ *  m_t \leftarrow \beta_1 m_{t-1} + (1-\beta_1)\nabla{\theta_t}
+ * \f] \f[
+ *  v_t \leftarrow \beta_2 v_{t-1} + (1-\beta_2){\nabla{\theta_t}}^2
+ * \f] \f[
+ *  \hat{m}_t \leftarrow \frac{m_t}{1 - {\beta_1}^t}
+ * \f] \f[
+ *  \hat{v}_t \leftarrow \frac{v_t}{1 - {\beta_2}^t}
+ * \f] \f[
+ *  \theta_{t+1} \leftarrow \theta_t - \frac{\eta}{\sqrt{\hat{v}_t+\epsilon}}\hat{m}_t
+ * \f]
+ */
+class AdamOptimizer : public Optimizer {
+public:
+	/*! Initialize an AdamOptimizer object.
+	 * \param initial_learning_rate Specify the \f$ \eta \f$ parameter.
+	 * \param beta1 Specify the \f$ \beta_1 \f$ parameter.
+	 * \param beta2 Specify the \f$ \beta_2 \f$ parameter.
+	 * \param epsilon Specify the \f$ \epsilon \f$ parameter.
+	 */
+	AdamOptimizer(Graph *graph, float initial_learning_rate = 0.001f,
+		float beta1 = 0.9f,
+		float beta2 = 0.999f,
+		float epsilon = 1e-8f);
+
+protected:
+	virtual int GetExtraDataCount() const override;
+	virtual void UpdateCallback(const std::vector<Tensor> &parameters,
+		const std::vector<Tensor> &gradients,
+		const std::vector<Tensor> &extras) const override;
+
+private:
+	float initial_learning_rate_;
+	float beta1_, beta2_;
+	mutable float beta1_t_, beta2_t_;
 	float epsilon_;
 };
 
