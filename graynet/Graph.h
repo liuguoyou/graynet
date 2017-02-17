@@ -59,11 +59,11 @@ public:
 
 	/*! Checks whether the gradient of given expression w.r.t. all parameters is correct.
 	 * This is done by comparing gradient with numerical differentiation.
-	 * @param loss: Must be a scalar expression.
+	 * \param loss: Must be a scalar expression.
 	 */
 	bool CheckGradient(const Expression &loss, bool verbose = false);
 
-	/*! @private */
+	/*! \private */
 	Expression AddNode(Node *node);
 
 private:

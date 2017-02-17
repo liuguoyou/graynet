@@ -23,24 +23,27 @@ public:
 	DeviceType GetDeviceType() const;
 
 #ifdef USE_CUDA
+	/*! \private */
 	cublasHandle_t GetCuBLASHandle() const;
+	/*! \private */
 	cusparseHandle_t GetCuSPARSEHandle() const;
+	/*! \private */
 	cudnnHandle_t GetCuDNNHandle() const;
 #endif
 
-	/*! @private */
+	/*! \private */
 	enum MemoryPoolType {
 		PermanentMemoryPool,
 		ScratchMemoryPool,
 		PinnedScratchMemoryPool,
 	};
-	/*! @private */
+	/*! \private */
 	void *AllocateMemory(int size, MemoryPoolType memory_pool);
-	/*! @private */
+	/*! \private */
 	void ZeroMemory(void *ptr, int size);
-	/*! @private */
+	/*! \private */
 	void CopyMemory(void *dst, const void *src, int size);
-	/*! @private */
+	/*! \private */
 	void ClearMemoryPool(MemoryPoolType memory_pool);
 
 private:

@@ -10,6 +10,8 @@
 #define __host__
 #endif
 
+/*! \cond NOSHOW */
+
 template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
 struct BinaryOpNodeFactory {
 	Node *Create(int lhs_node, int rhs_node);
@@ -213,3 +215,5 @@ DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x >
 	INSTANTIATE_UNARY(device_type, AtanhForward, AtanhBackward) \
 	INSTANTIATE_UNARY(device_type, SigmoidForward, SigmoidBackward) \
 	INSTANTIATE_UNARY(device_type, ReLUForward, ReLUBackward)
+
+/*! \endcond */

@@ -14,6 +14,7 @@
 # serve to show the default.
 
 import sys
+import subprocess
 import os
 
 # If extensions (or modules to document with autodoc) are in another directory,
@@ -29,7 +30,13 @@ import os
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['sphinx.ext.mathjax']
+extensions = ['sphinx.ext.mathjax', 'breathe']
+
+subprocess.call('doxygen', shell=True)
+
+breathe_projects = { "graynet": "xml/" }
+
+breathe_default_project = "graynet"
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

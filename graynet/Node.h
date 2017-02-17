@@ -7,7 +7,7 @@
 #include "Graph.h"
 #include "Tensor.h"
 
-/*! @private */
+/*! \private */
 class Node {
 public:
 	enum NodeFlags {
@@ -38,7 +38,7 @@ public:
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const;
 
-	/*! @private */
+	/*! \private */
 	const std::vector<int> &GetArguments() const { return args_; }
 
 private:
