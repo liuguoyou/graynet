@@ -69,7 +69,7 @@ static __global__ void TransformReduceKernel(TransformFunc transform_func, Store
 template<typename TransformFunc, typename ReduceFunc, typename StoreFunc, typename ExtraData>
 static __global__ void TransformReduceKernel(TransformFunc transform_func, ReduceFunc reduce_func, StoreFunc store_func,
 	int dims, int regular_total, int reduce_total, ReduceDesc reduce_desc, int reduces_per_thread, ExtraData extra_data) {
-	typedef cub::BlockReduce<float, kThreadsPerBlock> BlockReduceT;
+	typedef cub::BlockReduce<float, kMaxThreadsPerBlock> BlockReduceT;
 	__shared__ typename BlockReduceT::TempStorage temp_storage;
 
 	int regular_idx = blockIdx.x;
@@ -523,7 +523,7 @@ static __global__ void ReduceSumBackwardKernel(int nelems, int size,
 	const float *dEdY, float *dEdX) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
 	if (i < nelems) {
-		dEdX[i] = dEdY[i / size];
+		dEdX[i] += dEdY[i / size];
 	}
 }
 
@@ -568,11 +568,12 @@ public:
 
 		int size = x[0]->GetShape().GetSize();
 		int batch_size = x[0]->GetBatchSize();
+		int nelems = size * batch_size;
 
 		int threadsPerBlock = kThreadsPerBlock;
-		int blocksPerGrid = (batch_size + threadsPerBlock - 1) / threadsPerBlock;
+		int blocksPerGrid = (nelems + threadsPerBlock - 1) / threadsPerBlock;
 		ReduceSumBackwardKernel<<<blocksPerGrid, threadsPerBlock>>>(
-			batch_size * size, size, dEdY_data, dEdX_data);
+			nelems * size, size, dEdY_data, dEdX_data);
 	}
 };
 

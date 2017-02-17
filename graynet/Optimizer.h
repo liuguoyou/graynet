@@ -138,7 +138,7 @@ private:
  * \f] \f[
  *  \hat{v}_t \leftarrow \frac{v_t}{1 - {\beta_2}^t}
  * \f] \f[
- *  \theta_{t+1} \leftarrow \theta_t - \frac{\eta}{\sqrt{\hat{v}_t+\epsilon}}\hat{m}_t
+ *  \theta_{t+1} \leftarrow \theta_t - \frac{\eta}{\sqrt{\hat{v}_t}+\epsilon}\hat{m}_t
  * \f]
  */
 class AdamOptimizer : public Optimizer {
