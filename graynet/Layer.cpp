@@ -1,5 +1,6 @@
 #include "Graph.h"
 #include "Layer.h"
+#include "Utils.h"
 
 #include <cstdlib>
 
@@ -8,7 +9,7 @@ Expression LinearLayer::operator()(const char *name, const Expression &x, int ou
 	graph->PushScope(name);
 	const Shape &shape = x.GetShape();
 	if (shape.GetDimCount() != 1) // TODO: Relax this constraint
-		abort();
+		REPORT_ERROR("Only 1D input is supported.");
 	int input_dim = shape.GetDim(0);
 	graph->DefineParameter(&w, "w", Shape(output_dim, input_dim));
 	graph->DefineParameter(&b, "b", Shape(output_dim));

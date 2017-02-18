@@ -114,7 +114,7 @@ Expression Graph::AddParameter(const Shape &shape, InitMethod init_method) {
 	}
 
 	default:
-		abort();
+		REPORT_ERROR("Unimplemented initialization method: %d", init_method);
 	}
 	Expression ret = AddParameter(shape, parameter_data);
 	delete parameter_data;
@@ -142,7 +142,7 @@ void Graph::AppendScopeName(const char *name) {
 	int len = (int)strlen(name);
 	int need_dot = (d->scope_name_length_ > 0);
 	if (d->scope_name_length_ + need_dot + len >= kMaxScopeNameLength)
-		abort();
+		REPORT_ERROR("Parameter scope name too long.");
 	if (need_dot)
 		d->scope_name_[d->scope_name_length_++] = '.';
 	memcpy(d->scope_name_ + d->scope_name_length_, name, len + 1);
@@ -174,7 +174,7 @@ void Graph::PushScope(const char *name) {
 
 void Graph::PopScope() {
 	if (d->scope_indices_.empty())
-		abort();
+		REPORT_ERROR("Cannot pop scope. It's already at the top level.");
 	int index = d->scope_indices_.back();
 	d->scope_name_length_ = index;
 	d->scope_name_[d->scope_name_length_] = 0;
@@ -273,7 +273,7 @@ Expression Graph::AddNode(Node *node) {
 			if (batch_size == 1)
 				batch_size = cur_batch_size;
 			else if (batch_size != cur_batch_size)
-				abort();
+				REPORT_ERROR("Batch size mismatch: %d and %d.", batch_size, cur_batch_size);
 		}
 	}
 	Shape shape = node->ForwardShape(d->input_shape_scratch_);
@@ -285,8 +285,6 @@ Expression Graph::AddNode(Node *node) {
 }
 
 Tensor Graph::Forward(const Expression &expression) {
-	if (this != expression.GetGraph())
-		abort();
 	// TODO: Only compute relevant nodes
 	std::vector<const Tensor *> x;
 	int node_id = expression.GetNodeIndex();
@@ -315,15 +313,13 @@ Tensor Graph::Forward(const Expression &expression) {
 }
 
 void Graph::Backward(const Expression &expression) {
-	if (this != expression.GetGraph())
-		abort();
 	int node_id = expression.GetNodeIndex();
 	if (node_id < 0)
 		return;
 	// Expression must be scalar
 	const Shape &shape = d->outputs_[node_id].GetShape();
 	if (shape.GetSize() != 1)
-		abort();
+		REPORT_ERROR("Expression is not a scalar for backward propagation.");
 	int batch_size = d->outputs_[node_id].GetBatchSize();
 	// Set dE/dE = 1
 	float *dEdE_data = (float*)d->device_->AllocateMemory(batch_size * sizeof(float), Device::ScratchMemoryPool);

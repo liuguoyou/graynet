@@ -111,7 +111,7 @@ public:
 		const float *sparse_data, const int *batch_indices, const int *indices)
 		: Node{}, batch_size_(batch_size), shape_(shape), nonzero_count_(nonzero_count) {
 		if (shape.GetDimCount() != 1)
-			abort();
+			REPORT_ERROR("Shape of sparse input must be 1D.");
 		sparse_data_ = (float *)PinMemory(graph->GetDevice(), sparse_data, nonzero_count * sizeof(float));
 		batch_indices_ = (int *)PinMemory(graph->GetDevice(), batch_indices, (batch_size + 1) * sizeof(int));
 		indices_ = (int *)PinMemory(graph->GetDevice(), indices, nonzero_count * sizeof(int));
@@ -169,7 +169,7 @@ public:
 		const Shape &lhs_shape = x_shapes[0];
 		const Shape &rhs_shape = x_shapes[1];
 		if (lhs_shape != rhs_shape)
-			abort();
+			REPORT_ERROR("Shape of left and right operands mismatch.");
 		return lhs_shape;
 	}
 
@@ -203,14 +203,13 @@ public:
 				}
 		}
 		else
-			abort();
+			DEBUG_BREAK();
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
-			abort();
-		}
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value)
+			REPORT_ERROR("Backward propagation is unsupported for this expression.");
 
 		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
 		const float *y_data = y->GetData();
@@ -252,7 +251,7 @@ public:
 				}
 		}
 		else
-			abort();
+			DEBUG_BREAK();
 	}
 };
 
@@ -312,9 +311,8 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
-			abort();
-		}
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value)
+			REPORT_ERROR("Backward propagation is unsupported for this expression.");
 
 		const float *rhs_data = x[0]->GetData();
 		const float *y_data = y->GetData();
@@ -387,9 +385,8 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
-			abort();
-		}
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value)
+			REPORT_ERROR("Backward propagation is unsupported for this expression.");
 
 		const float *lhs_data = x[0]->GetData();
 		const float *y_data = y->GetData();
@@ -648,23 +645,31 @@ public:
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		const Shape &lhs_shape = x_shapes[0], &rhs_shape = x_shapes[1];
-		if (lhs_shape.GetDimCount() > 2 || rhs_shape.GetDimCount() > 2)
-			abort();
-		if (lhs_shape.GetDimCount() == 1 && rhs_shape.GetDimCount() == 1) // Should use Dot() instead
-			abort();
+		if (lhs_shape.GetDimCount() > 2)
+			REPORT_ERROR("Left operand is not a vector or matrix.");
+		if (rhs_shape.GetDimCount() > 2)
+			REPORT_ERROR("Right operand is not a vector or matrix.");
+		if (lhs_shape.GetDimCount() == 1 && rhs_shape.GetDimCount() == 1)
+			REPORT_ERROR("Left and right operands are both vectors, use Dot() for now.");
 		if (lhs_shape.GetDimCount() == 1) {
-			if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0))
-				abort();
+			if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0)) {
+				REPORT_ERROR("Dimension mismatch for vector-matrix multiplication: (%d) * (%d, %d).",
+					lhs_shape.GetDim(0), rhs_shape.GetDim(0), rhs_shape.GetDim(1));
+			}
 			return Shape(rhs_shape.GetDim(1));
 		}
 		else if (rhs_shape.GetDimCount() == 1) {
-			if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0))
-				abort();
+			if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0)) {
+				REPORT_ERROR("Dimension mismatch for matrix-vector multiplication: (%d) * (%d, %d).",
+					lhs_shape.GetDim(0), lhs_shape.GetDim(1), rhs_shape.GetDim(0));
+			}
 			return Shape(lhs_shape.GetDim(0));
 		}
 		else {
-			if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0))
-				abort();
+			if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0)) {
+				REPORT_ERROR("Dimension mismatch for matrix-matrix multiplication: (%d, %d) * (%d, %d).",
+					lhs_shape.GetDim(0), lhs_shape.GetDim(1), rhs_shape.GetDim(0), rhs_shape.GetDim(1));
+			}
 			return Shape(lhs_shape.GetDim(0), rhs_shape.GetDim(1));
 		}
 	}
@@ -764,15 +769,15 @@ public:
 		const Shape &lhs_shape = x_shapes[0];
 		const Shape &rhs_shape = x_shapes[1];
 		if (lhs_shape.GetDimCount() != 1 || rhs_shape.GetDimCount() != 1)
-			abort();
+			REPORT_ERROR("Dot only supports vector inputs.");
 		if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0))
-			abort();
+			REPORT_ERROR("Length of dot operands mismatch.");
 		return Shape(1);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		if (graph->GetDeviceType() == CPU)
-			abort();
+			REPORT_ERROR("Dot is only implemented on GPU.");
 
 		if (x[0]->IsDense() && x[1]->IsDense()) {
 			// TODO: Move this to a separate node
@@ -788,7 +793,7 @@ public:
 		else if (x[0]->IsSparse() && x[1]->IsDense())
 			lhs = x[0], rhs = x[1];
 		else // TODO: Check should be checked in ForwardShape()
-			abort();
+			DEBUG_BREAK();
 
 		float alpha = 1.f, beta = 0.f;
 		CUSPARSE_CALL(cusparseScsrmv(graph->GetDevice()->GetCuSPARSEHandle(), CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -800,7 +805,7 @@ public:
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
 		if (graph->GetDeviceType() == CPU)
-			abort();
+			REPORT_ERROR("Dot is only implemented in GPU.");
 
 		if (x[0]->IsDense() && x[1]->IsDense()) {
 			// TODO: Move this to a separate node
@@ -829,7 +834,7 @@ public:
 			dEdL = dEdX[0], dEdR = dEdX[1];
 		}
 		else // TODO: Check should be checked in ForwardShape()
-			abort();
+			DEBUG_BREAK();
 		
 		AllocateClearTensor(graph, dEdR);
 		// dEdL += dEdY * R'
@@ -858,19 +863,19 @@ static Shape FilterForwardShape(const Shape &x_shape, const Shape &filter_shape,
 	int filter_window_offset = is_pooling ? 0 : 2;
 
 	if (x_shape.GetDimCount() < 2)
-		abort();
+		REPORT_ERROR("Input must have at least rank 2.");
 	int dims = x_shape.GetDimCount() - 1;
 	if (filter_shape.GetDimCount() != filter_window_offset + dims)
-		abort();
+		REPORT_ERROR("Incompatible filter shape.");
 	if (strides.GetDimCount() != dims)
-		abort();
+		REPORT_ERROR("Incompatible strides.");
 	int input_channels = x_shape.GetDim(0);
 	int output_channels;
 	if (is_pooling)
 		output_channels = input_channels;
 	else {
 		if (filter_shape.GetDim(1) != input_channels)
-			abort();
+			REPORT_ERROR("Incompatible input and filter shape.");
 		output_channels = filter_shape.GetDim(0);
 	}
 
@@ -924,7 +929,7 @@ public:
 		int dims = y->GetShape().GetDimCount() - 1;
 
 		if (graph->GetDeviceType() == CPU)
-			abort();
+			REPORT_ERROR("Convolution is only implemented in GPU.");
 
 		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
 		x_dims[0] = x[0]->GetBatchSize();
@@ -970,7 +975,7 @@ public:
 		float *dEdF_data = dEdX[1]->GetData();
 
 		if (graph->GetDeviceType() == CPU)
-			abort();
+			REPORT_ERROR("Convolution is only implemented in GPU.");
 
 		float alpha = 1.f, beta = 1.f;
 
@@ -1045,7 +1050,7 @@ public:
 		int ndims = y->GetShape().GetDimCount() - 1;
 
 		if (graph->GetDeviceType() == CPU)
-			abort();
+			REPORT_ERROR("Pooling is only implemented in GPU.");
 
 		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
 		x_dims[0] = x[0]->GetBatchSize();
@@ -1087,7 +1092,7 @@ public:
 		float *dEdX_data = dEdX[0]->GetData();
 
 		if (graph->GetDeviceType() == CPU)
-			abort();
+			REPORT_ERROR("Pooling is only implemented in GPU.");
 		
 		float alpha = 1.f, beta = 1.f;
 		CUDNN_CALL(cudnnPoolingBackward(graph->GetDevice()->GetCuDNNHandle(), pooling_desc_,
@@ -1120,7 +1125,8 @@ public:
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		if (x_shapes[0].GetSize() != shape_.GetSize())
-			abort();
+			REPORT_ERROR("Total size of input (%d) and requested shape (%d) mismatch.",
+				x_shapes[0].GetSize(), shape_.GetSize());
 		return shape_;
 	}
 
@@ -1206,13 +1212,13 @@ public:
 
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		if (start_.GetDimCount() != 1 || size_.GetDimCount() != 1)
-			abort();
+			DEBUG_BREAK();
 		return size_;
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		if (x[0]->GetBatchSize() != 1)
-			abort();
+			DEBUG_BREAK();
 		float *ptr = x[0]->GetData() + start_.GetDim(0);
 		int size = size_.GetDim(0) * sizeof(float);
 		graph->GetDevice()->CopyMemory(y->GetData(), ptr, size);
@@ -1423,7 +1429,7 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		abort();
+		REPORT_ERROR("Backward propagation is unsupported for this expression.");
 	}
 
 private:

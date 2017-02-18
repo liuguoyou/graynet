@@ -9,6 +9,10 @@
 #define DEBUG_BREAK()	raise(SIGTRAP)
 #endif
 
+[[noreturn]] void ReportError(const char *msg, ...);
+
+#define REPORT_ERROR(msg, ...) ReportError(msg, __VA_ARGS__)
+
 #ifdef USE_CUDA
 #include <cstdio>
 

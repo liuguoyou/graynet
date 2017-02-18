@@ -175,7 +175,7 @@ void *Device::AllocateMemory(int size, MemoryPoolType memory_pool) {
 		return d->pinned_scratch_memory_pool_->AllocateMemory(size);
 #endif
 	else
-		abort();
+		REPORT_ERROR("Invalid memory pool: %d", memory_pool);
 }
 
 void Device::ZeroMemory(void *ptr, int size) {
@@ -206,5 +206,5 @@ void Device::ClearMemoryPool(MemoryPoolType memory_pool) {
 		d->pinned_scratch_memory_pool_->Clear();
 #endif
 	else
-		abort();
+		REPORT_ERROR("Invalid memory pool: %d", memory_pool);
 }

@@ -1,5 +1,10 @@
 #include "Utils.h"
 
+#include <cstdarg>
+#include <cstdio>
+#include <exception>
+#include <stdexcept>
+
 #ifdef USE_CUDA
 #include <cublas_v2.h>
 #include <cusparse_v2.h>
@@ -39,3 +44,12 @@ const char * GetCuSPARSEErrorString(int status) {
 }
 
 #endif
+
+void ReportError(const char *msg, ...) {
+	char buf[512];
+	va_list ap;
+	va_start(ap, msg);
+	vsprintf(buf, msg, ap);
+	fputs(buf, stderr);
+	throw std::runtime_error(buf);
+}

@@ -62,6 +62,9 @@ public:
 	float ReduceSum() const;
 
 private:
+	void EnsureDense() const;
+	void EnsureSparse() const;
+
 	DeviceType device_type_;
 	bool is_sparse_;
 	int batch_size_;

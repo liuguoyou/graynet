@@ -192,8 +192,10 @@ public:
 		const Shape &lhs_shape = x_shapes[0];
 		const Shape &rhs_shape = x_shapes[1];
 		// Broadcasting
-		if (lhs_shape.GetDimCount() != rhs_shape.GetDimCount())
-			abort();
+		if (lhs_shape.GetDimCount() != rhs_shape.GetDimCount()) {
+			REPORT_ERROR("Input operands have different ranks (%d and %d).",
+				lhs_shape.GetDimCount(), rhs_shape.GetDimCount());
+		}
 		int ndims = lhs_shape.GetDimCount();
 		Shape shape;
 		for (int i = 0; i < ndims; i++) {
@@ -203,8 +205,10 @@ public:
 				shape.PushDim(lhs_shape.GetDim(i));
 			else if (lhs_shape.GetDim(i) == rhs_shape.GetDim(i))
 				shape.PushDim(lhs_shape.GetDim(i));
-			else
-				abort();
+			else {
+				REPORT_ERROR("Incompatible size at dimension %d: %d and %d.",
+					i, lhs_shape.GetDim(i), rhs_shape.GetDim(i));
+			}
 		}
 		return shape;
 	}
@@ -234,9 +238,8 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
-			abort();
-		}
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value)
+			REPORT_ERROR("Backward propagation is unsupported for this expression.");
 
 		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
 		const float *y_data = y->GetData();
@@ -354,9 +357,8 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
-			abort();
-		}
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value)
+			REPORT_ERROR("Backward propagation is unsupported for this expression.");
 
 		const float *rhs_data = x[0]->GetData();
 		const float *y_data = y->GetData();
@@ -423,9 +425,8 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		if (std::is_same<BackwardFunc, BinaryNoBackward>::value) {
-			abort();
-		}
+		if (std::is_same<BackwardFunc, BinaryNoBackward>::value)
+			REPORT_ERROR("Backward propagation is unsupported for this expression.");
 
 		const float *lhs_data = x[0]->GetData();
 		const float *y_data = y->GetData();
@@ -615,12 +616,16 @@ public:
 	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
 		const Shape &shape = x_shapes[0];
 		if (start_.GetDimCount() != size_.GetDimCount())
-			abort();
+			REPORT_ERROR("Rank mismatch for start and size parameters.");
+		if (shape.GetDimCount() != start_.GetDimCount())
+			REPORT_ERROR("Rank mismatch for input and given slicing range.");
 		for (int i = 0; i < start_.GetDimCount(); i++) {
-			if (start_.GetDim(i) < 0 || start_.GetDim(i) >= shape.GetDim(i))
-				abort();
-			if (start_.GetDim(i) + size_.GetDim(i) > shape.GetDim(i))
-				abort();
+			if (start_.GetDim(i) < 0 || start_.GetDim(i) >= shape.GetDim(i)
+				|| start_.GetDim(i) + size_.GetDim(i) > shape.GetDim(i)) {
+				REPORT_ERROR("Slicing out of range for dimension: %d. "
+					"Input range: [0, %d). Requested range: [%d, %d).",
+					i, 0, shape.GetDim(i), start_.GetDim(i), start_.GetDim(i) + size_.GetDim(i));
+			}
 		}
 		return size_;
 	}
@@ -856,7 +861,7 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		abort();
+		REPORT_ERROR("Backward propagation is unsupported for this expression.");
 	}
 
 private:

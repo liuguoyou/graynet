@@ -23,7 +23,7 @@ public:
 	virtual ~Node();
 
 	/*! Calculate output shape */
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const;
+	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const = 0;
 
 	/*! Get batch size, only used when GetArguments() == 0. */
 	virtual int GetBatchSize() const;
@@ -32,11 +32,11 @@ public:
 	virtual int GetFlags() const;
 
 	/*! Do forward computation */
-	virtual void Forward(Graph *grpah, const std::vector<const Tensor *> &x, Tensor *y) const;
+	virtual void Forward(Graph *grpah, const std::vector<const Tensor *> &x, Tensor *y) const = 0;
 
 	/*! Do backward computation */
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
-		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const;
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const = 0;
 
 	/*! \private */
 	const std::vector<int> &GetArguments() const { return args_; }

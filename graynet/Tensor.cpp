@@ -23,14 +23,12 @@ Tensor::Tensor(DeviceType device_type, int batch_size, const Shape &shape, int n
 }
 
 float *Tensor::GetData() const {
-	if (is_sparse_)
-		abort();
+	EnsureDense();
 	return data_;
 }
 
 void Tensor::GetValue(float *value) const {
-	if (is_sparse_)
-		abort();
+	EnsureDense();
 	int size = batch_size_ * shape_.GetSize() * sizeof(float);
 #ifdef USE_CUDA
 	if (device_type_ == GPU)
@@ -41,8 +39,7 @@ void Tensor::GetValue(float *value) const {
 }
 
 float Tensor::GetValueFlat(int index) const {
-	if (is_sparse_)
-		abort();
+	EnsureDense();
 #ifdef USE_CUDA
 	if (device_type_ == GPU) {
 		float value;
@@ -55,8 +52,7 @@ float Tensor::GetValueFlat(int index) const {
 }
 
 void Tensor::SetValueFlat(int index, float value) {
-	if (is_sparse_)
-		abort();
+	EnsureDense();
 #ifdef USE_CUDA
 	if (device_type_ == GPU)
 		CUDA_CALL(cudaMemcpy(&data_[index], &value, sizeof(float), cudaMemcpyHostToDevice));
@@ -66,32 +62,27 @@ void Tensor::SetValueFlat(int index, float value) {
 }
 
 int Tensor::GetNonZeroCount() const {
-	if (!is_sparse_)
-		abort();
+	EnsureSparse();
 	return nonzero_count_;
 }
 
 float *Tensor::GetSparseData() const {
-	if (!is_sparse_)
-		abort();
+	EnsureSparse();
 	return data_;
 }
 
 int *Tensor::GetSparseColumnIndices() const {
-	if (!is_sparse_)
-		abort();
+	EnsureSparse();
 	return column_indices_;
 }
 
 int *Tensor::GetSparseRowIndices() const {
-	if (!is_sparse_)
-		abort();
+	EnsureSparse();
 	return row_indices_;
 }
 
 float Tensor::ToScalar() const {
-	if (is_sparse_)
-		abort();
+	EnsureDense();
 #ifdef USE_CUDA
 	if (device_type_ == GPU) {
 		float data;
@@ -104,8 +95,7 @@ float Tensor::ToScalar() const {
 }
 
 float Tensor::ReduceSum() const {
-	if (is_sparse_)
-		abort();
+	EnsureDense();
 	int total_size = batch_size_ * shape_.GetSize();
 #ifdef USE_CUDA
 	if (device_type_ == GPU) {
@@ -125,4 +115,14 @@ float Tensor::ReduceSum() const {
 			sum += data_[i];
 		return sum;
 	}
+}
+
+void Tensor::EnsureDense() const {
+	if (is_sparse_)
+		REPORT_ERROR("This operation only supports dense tensors.");
+}
+
+void Tensor::EnsureSparse() const {
+	if (!is_sparse_)
+		REPORT_ERROR("This operation only supports sparse tensors.");
 }
