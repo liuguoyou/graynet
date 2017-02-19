@@ -12,6 +12,17 @@
 
 /*! \cond NOSHOW */
 
+static void AllocateClearTensor(Graph *graph, Tensor *tensor) {
+	if (tensor->GetData() == nullptr) {
+		int batch_size = tensor->GetBatchSize();
+		Shape shape = tensor->GetShape();
+		int size = batch_size * shape.GetSize() * sizeof(float);
+		float *data = (float*)graph->GetDevice()->AllocateMemory(size, Device::ScratchMemoryPool);
+		graph->GetDevice()->ZeroMemory(data, size);
+		*tensor = Tensor(graph->GetDeviceType(), batch_size, shape, data);
+	}
+}
+
 template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
 struct BinaryOpNodeFactory {
 	Node *Create(int lhs_node, int rhs_node);
@@ -30,6 +41,11 @@ struct BinaryRightScalarOpNodeFactory {
 template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
 struct UnaryOpNodeFactory {
 	Node *Create(int node);
+};
+
+template<typename Dummy, DeviceType DeviceType>
+struct SparseDotNodeFactory {
+	Node *Create(int lhs_node, int rhs_node);
 };
 
 template<typename Dummy, DeviceType DeviceType>

@@ -43,9 +43,6 @@ public:
 	/*! Parameter name to id map */
 	std::unordered_map<std::string, int> parameter_names_; // TODO: Migrate to string_view as key
 
-	/*! Scratch spaces used for forward/backward calculations */
-	std::vector<Shape> input_shape_scratch_;
-
 	/*! Random generator */
 	std::mt19937 rng_;
 
@@ -257,9 +254,6 @@ bool Graph::CheckGradient(const Expression &loss, bool verbose) {
 
 Expression Graph::AddNode(Node *node, const Shape &output_shape, bool sparse_output, int batch_size) {
 	d->nodes_.push_back(node);
-	d->input_shape_scratch_.clear();
-	for (int input_id : node->GetArguments())
-		d->input_shape_scratch_.push_back(GetNodeShape(input_id));
 	// No predefined batch size given, calculate batch size based on input arguments
 	if (batch_size == -1) {
 		if (node->GetArguments().empty())
@@ -276,8 +270,8 @@ Expression Graph::AddNode(Node *node, const Shape &output_shape, bool sparse_out
 				REPORT_ERROR("Batch size mismatch: %d and %d.", batch_size, cur_batch_size);
 		}
 	}
-	d->outputs_.push_back(Tensor(GetDeviceType(), batch_size, output_shape, nullptr));
-	d->gradients_.push_back(Tensor(GetDeviceType(), batch_size, output_shape, nullptr));
+	d->outputs_.emplace_back(GetDeviceType(), batch_size, output_shape, sparse_output);
+	d->gradients_.emplace_back(GetDeviceType(), batch_size, output_shape, sparse_output);
 
 	int id = (int)d->nodes_.size() - 1;
 	return Expression(this, id);
@@ -408,6 +402,13 @@ const Shape &Graph::GetNodeShape(int index) const {
 		return d->outputs_[index].GetShape();
 	else
 		return d->parameters_[PARAMETER_INDEX(index)].GetShape();
+}
+
+bool Graph::IsNodeOutputSparse(int index) const {
+	if (index >= 0)
+		return d->outputs_[index].IsSparse();
+	else
+		return d->parameters_[PARAMETER_INDEX(index)].IsSparse();
 }
 
 int Graph::GetNodeBatchSize(int index) const {

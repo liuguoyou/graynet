@@ -8,6 +8,10 @@
 #include <cuda_runtime.h>
 #endif
 
+Tensor::Tensor(DeviceType device_type, int batch_size, const Shape &shape, bool is_sparse)
+	: device_type_(device_type), is_sparse_(is_sparse), batch_size_(batch_size), shape_(shape), data_(nullptr) {
+}
+
 Tensor::Tensor(DeviceType device_type, const Shape &shape, float *data)
 	: device_type_(device_type), is_sparse_(false), batch_size_(1), shape_(shape), data_(data) {
 }

@@ -13,14 +13,25 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cudnn.h>
-#include <cusparse_v2.h>
 #endif
 
 Expression::Expression() : graph_(nullptr), index_(0) {
 }
 
+int Expression::GetBatchSize() const {
+	return graph_->GetNodeBatchSize(index_);
+}
+
 Shape Expression::GetShape() const {
 	return graph_->GetNodeShape(index_);
+}
+
+bool Expression::IsDense() const {
+	return !graph_->IsNodeOutputSparse(index_);
+}
+
+bool Expression::IsSparse() const {
+	return graph_->IsNodeOutputSparse(index_);
 }
 
 Tensor Expression::Forward() const {
@@ -721,114 +732,57 @@ Expression MatMul(const Expression &lhs, const Expression &rhs) {
 	return graph->AddNode(new MatMulNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()), output_shape);
 }
 
-// TODO: Move to more appropriate position
-static void AllocateClearTensor(Graph *graph, Tensor *tensor) {
-	if (tensor->GetData() == nullptr) {
-		int batch_size = tensor->GetBatchSize();
-		Shape shape = tensor->GetShape();
-		int size = batch_size * shape.GetSize() * sizeof(float);
-		float *data = (float*)graph->GetDevice()->AllocateMemory(size, Device::ScratchMemoryPool);
-		graph->GetDevice()->ZeroMemory(data, size);
-		*tensor = Tensor(graph->GetDeviceType(), batch_size, shape, data);
-	}
-}
-
-class SparseDotNode : public Node {
+class SparseDotNodeCPU : public Node {
 public:
-	SparseDotNode(int lhs, int rhs) : Node{ lhs, rhs } {
-#ifdef USE_CUDA
-		CUSPARSE_CALL(cusparseCreateMatDescr(&mat_desc_));
-		CUSPARSE_CALL(cusparseSetMatType(mat_desc_, CUSPARSE_MATRIX_TYPE_GENERAL));
-		CUSPARSE_CALL(cusparseSetMatIndexBase(mat_desc_, CUSPARSE_INDEX_BASE_ZERO));
-#endif
-	}
-
-	virtual ~SparseDotNode() {
-#ifdef USE_CUDA
-		CUSPARSE_CALL(cusparseDestroyMatDescr(mat_desc_));
-#endif
-	}
+	SparseDotNodeCPU(int lhs_node, int rhs_node) : Node{ lhs_node, rhs_node } {}
 
 	virtual int GetFlags() const override {
 		return NoAllocateBackwardOutput;
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
-		if (graph->GetDeviceType() == CPU)
-			REPORT_ERROR("Dot is only implemented on GPU.");
-
-		if (x[0]->IsDense() && x[1]->IsDense()) {
-			// TODO: Move this to a separate node
-			int count = x[0]->GetShape().GetSize();
-			SGEMM(graph->GetDevice(), CblasNoTrans, CblasNoTrans, CblasNoTrans,
-				1, 1, count, 1.f, x[0]->GetData(), x[1]->GetData(), 0.f, y->GetData());
-			return;
+		const float *lhs_data = x[0]->GetSparseData();
+		const int *row_indices = x[0]->GetSparseRowIndices();
+		const int *column_indices = x[0]->GetSparseColumnIndices();
+		int nnz = x[0]->GetNonZeroCount();
+		const float *rhs_data = x[1]->GetData();
+		float *y_data = y->GetData();
+		int rows = y->GetBatchSize();
+		
+		graph->GetDevice()->ZeroMemory(y_data, rows * sizeof(float));
+		for (int i = 0; i < rows; i++) {
+			float sum = 0;
+			for (int j = row_indices[i]; j < row_indices[i + 1]; j++)
+				sum += lhs_data[j] * rhs_data[column_indices[j]];
+			y_data[i] = sum;
 		}
-
-		const Tensor *lhs, *rhs;
-		if (x[0]->IsDense() && x[1]->IsSparse())
-			lhs = x[1], rhs = x[0];
-		else if (x[0]->IsSparse() && x[1]->IsDense())
-			lhs = x[0], rhs = x[1];
-		else // TODO: Check should be checked in ForwardShape()
-			DEBUG_BREAK();
-
-		float alpha = 1.f, beta = 0.f;
-		CUSPARSE_CALL(cusparseScsrmv(graph->GetDevice()->GetCuSPARSEHandle(), CUSPARSE_OPERATION_NON_TRANSPOSE,
-			lhs->GetBatchSize(), lhs->GetShape().GetDim(0), lhs->GetNonZeroCount(),
-			&alpha, mat_desc_, lhs->GetSparseData(), lhs->GetSparseRowIndices(), lhs->GetSparseColumnIndices(),
-			rhs->GetData(), &beta, y->GetData()));
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		if (graph->GetDeviceType() == CPU)
-			REPORT_ERROR("Dot is only implemented in GPU.");
-
-		if (x[0]->IsDense() && x[1]->IsDense()) {
-			// TODO: Move this to a separate node
-			int count = x[0]->GetShape().GetSize();
-			AllocateClearTensor(graph, dEdX[0]);
-			AllocateClearTensor(graph, dEdX[1]);
-			// dE/dL = R * dE/dY
-			// dE/dR = L * dE/dY
-			CUBLAS_CALL(cublasSetPointerMode_v2(graph->GetDevice()->GetCuBLASHandle(), CUBLAS_POINTER_MODE_DEVICE));
-			CUBLAS_CALL(cublasSaxpy_v2(graph->GetDevice()->GetCuBLASHandle(), count,
-				dEdY->GetData(), x[1]->GetData(), 1, dEdX[0]->GetData(), 1));
-			CUBLAS_CALL(cublasSaxpy_v2(graph->GetDevice()->GetCuBLASHandle(), count,
-				dEdY->GetData(), x[0]->GetData(), 1, dEdX[1]->GetData(), 1));
-			CUBLAS_CALL(cublasSetPointerMode_v2(graph->GetDevice()->GetCuBLASHandle(), CUBLAS_POINTER_MODE_HOST));
-			return;
-		}
-
-		const Tensor *lhs, *rhs;
-		Tensor *dEdL, *dEdR;
-		if (x[0]->IsDense() && x[1]->IsSparse()) {
-			lhs = x[1], rhs = x[0];
-			dEdL = dEdX[1], dEdR = dEdX[0];
-		}
-		else if (x[0]->IsSparse() && x[1]->IsDense()) {
-			lhs = x[0], rhs = x[1];
-			dEdL = dEdX[0], dEdR = dEdX[1];
-		}
-		else // TODO: Check should be checked in ForwardShape()
-			DEBUG_BREAK();
-		
-		AllocateClearTensor(graph, dEdR);
-		// dEdL += dEdY * R'
-		// dEdR += L' * dEdY
-		float alpha = 1.f, beta = 1.f;
 		// dEdL not implemented for now.
-		CUSPARSE_CALL(cusparseScsrmv(graph->GetDevice()->GetCuSPARSEHandle(), CUSPARSE_OPERATION_TRANSPOSE,
-			lhs->GetBatchSize(), lhs->GetShape().GetDim(0), lhs->GetNonZeroCount(),
-			&alpha, mat_desc_, lhs->GetSparseData(), lhs->GetSparseRowIndices(), lhs->GetSparseColumnIndices(),
-			dEdY->GetData(), &beta, dEdR->GetData()));
-	}
+		AllocateClearTensor(graph, dEdX[1]);
 
-private:
-#ifdef USE_CUDA
-	cusparseMatDescr_t mat_desc_;
-#endif
+		const int *row_indices = x[0]->GetSparseRowIndices();
+		const int *column_indices = x[0]->GetSparseColumnIndices();
+		int nnz = x[0]->GetNonZeroCount();
+		const float *x_data = x[1]->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		int rows = y->GetBatchSize();
+		const float *lhs_data = x[0]->GetSparseData();
+		float *dEdR_data = dEdX[1]->GetData();
+
+		for (int i = 0; i < rows; i++)
+			for (int j = row_indices[i]; j < row_indices[i + 1]; j++)
+				dEdR_data[column_indices[j]] += lhs_data[j] * dEdY_data[i];
+	}
+};
+
+template<typename Dummy>
+struct SparseDotNodeFactory<Dummy, CPU> {
+	Node *Create(int lhs_node, int rhs_node) {
+		return new SparseDotNodeCPU(lhs_node, rhs_node);
+	}
 };
 
 Expression Dot(const Expression &lhs, const Expression &rhs) {
@@ -837,9 +791,21 @@ Expression Dot(const Expression &lhs, const Expression &rhs) {
 		REPORT_ERROR("Dot only supports vector inputs.");
 	if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0))
 		REPORT_ERROR("Length of dot operands mismatch.");
-
 	Graph *graph = lhs.GetGraph();
-	return graph->AddNode(new SparseDotNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()), Shape(1));
+	if (lhs.IsDense() && rhs.IsDense())
+		return ReduceSum(lhs * rhs);
+	else if (lhs.IsSparse() && rhs.IsDense()) {
+		if (rhs.GetBatchSize() != 1)
+			REPORT_ERROR("Batch size of dense vector must be 1.");
+		return CreateDeviceSpecificNode<SparseDotNodeFactory>(graph, Shape(1), lhs.GetNodeIndex(), rhs.GetNodeIndex());
+	}
+	else if (lhs.IsDense() && rhs.IsSparse()) {
+		if (lhs.GetBatchSize() != 1)
+			REPORT_ERROR("Batch size of dense vector must be 1.");
+		return CreateDeviceSpecificNode<SparseDotNodeFactory>(graph, Shape(1), rhs.GetNodeIndex(), lhs.GetNodeIndex());
+	}
+	else
+		REPORT_ERROR("Sparse-sparse vector dot is unsupported.");
 }
 
 static Shape FilterForwardShape(const Shape &x_shape, const Shape &filter_shape,
@@ -1161,7 +1127,7 @@ public:
 		int batch_size = x[0]->GetBatchSize();
 		for (int batch_id = 0; batch_id < batch_size; batch_id++)
 			for (int i = 0; i < size; i++)
-				dEdX_data[batch_id * size + i] = dEdY_data[batch_id];
+				dEdX_data[batch_id * size + i] += dEdY_data[batch_id];
 	}
 };
 

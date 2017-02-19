@@ -6,10 +6,13 @@
 /*! Pointer to CPU/GPU Tensor storage */
 class Tensor {
 public:
-	/*! Construct a tensor object with given shape and data pointer. */
+	/*! Construct an empty tensor object with given shape and batch size */
+	Tensor(DeviceType device_type, int batch_size, const Shape &shape, bool is_sparse);
+
+	/*! Construct a dense tensor object with given shape and data pointer. */
 	Tensor(DeviceType device_type, const Shape &shape, float *data);
 
-	/*! Construct a tensor object with given shape, batch size and data pointer. */
+	/*! Construct a dense tensor object with given shape, batch size and data pointer. */
 	Tensor(DeviceType device_type, int batch_size, const Shape &shape, float *data);
 
 	/*! Construct a sparse vector tensor object with given shape, batch size and data pointers. */

@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <cudnn.h>
 #include <cub/block/block_reduce.cuh>
+#include <cusparse_v2.h>
 
 static const int kThreadsPerBlock = 128;
 static const int kMaxThreadsPerBlock = 512;
@@ -480,6 +481,59 @@ INSTANTIATE_BINARY_OPS(GPU)
 INSTANTIATE_BINARY_LEFT_SCALAR_OPS(GPU)
 INSTANTIATE_BINARY_RIGHT_SCALAR_OPS(GPU)
 INSTANTIATE_UNARY_OPS(GPU)
+
+class SparseDotNodeGPU : public Node {
+public:
+	SparseDotNodeGPU(int lhs, int rhs) : Node{ lhs, rhs } {
+		CUSPARSE_CALL(cusparseCreateMatDescr(&mat_desc_));
+		CUSPARSE_CALL(cusparseSetMatType(mat_desc_, CUSPARSE_MATRIX_TYPE_GENERAL));
+		CUSPARSE_CALL(cusparseSetMatIndexBase(mat_desc_, CUSPARSE_INDEX_BASE_ZERO));
+	}
+
+	virtual ~SparseDotNodeGPU() {
+		CUSPARSE_CALL(cusparseDestroyMatDescr(mat_desc_));
+	}
+
+	virtual int GetFlags() const override {
+		return NoAllocateBackwardOutput;
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const Tensor *lhs = x[0], *rhs = x[1];
+		float alpha = 1.f, beta = 0.f;
+		CUSPARSE_CALL(cusparseScsrmv(graph->GetDevice()->GetCuSPARSEHandle(), CUSPARSE_OPERATION_NON_TRANSPOSE,
+			lhs->GetBatchSize(), lhs->GetShape().GetDim(0), lhs->GetNonZeroCount(),
+			&alpha, mat_desc_, lhs->GetSparseData(), lhs->GetSparseRowIndices(), lhs->GetSparseColumnIndices(),
+			rhs->GetData(), &beta, y->GetData()));
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const Tensor *lhs = x[0], *rhs = x[1];
+		Tensor *dEdL = dEdX[0], *dEdR = dEdX[1];
+		AllocateClearTensor(graph, dEdR);
+		// dEdL += dEdY * R'
+		// dEdR += L' * dEdY
+		float alpha = 1.f, beta = 1.f;
+		// dEdL not implemented for now.
+		CUSPARSE_CALL(cusparseScsrmv(graph->GetDevice()->GetCuSPARSEHandle(), CUSPARSE_OPERATION_TRANSPOSE,
+			lhs->GetBatchSize(), lhs->GetShape().GetDim(0), lhs->GetNonZeroCount(),
+			&alpha, mat_desc_, lhs->GetSparseData(), lhs->GetSparseRowIndices(), lhs->GetSparseColumnIndices(),
+			dEdY->GetData(), &beta, dEdR->GetData()));
+	}
+
+private:
+	cusparseMatDescr_t mat_desc_;
+};
+
+template<typename Dummy>
+struct SparseDotNodeFactory<Dummy, GPU> {
+	Node *Create(int lhs_node, int rhs_node) {
+		return new SparseDotNodeGPU(lhs_node, rhs_node);
+	}
+};
+
+template struct SparseDotNodeFactory<void, GPU>;
 
 struct Empty {};
 

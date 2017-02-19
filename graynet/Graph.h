@@ -97,6 +97,9 @@ private:
 	/*! Get shape of node with given index. */
 	const Shape &GetNodeShape(int index) const;
 
+	/*! Test if the output of a node is sparse. */
+	bool IsNodeOutputSparse(int index) const;
+
 	/*! Get batch size of node with given index. */
 	int GetNodeBatchSize(int index) const;
 

@@ -11,27 +11,36 @@ public:
 	/*! Default constructor, constructs an invalid expression handle. */
 	Expression();
 
-	/*! Test if this object is a valid expression */
+	/*! Test if this object is a valid expression. */
 	bool IsValid() const { return graph_ != nullptr; }
 
-	/*! Get the graph object this expression belongs to */
+	/*! Get the graph object this expression belongs to. */
 	Graph *GetGraph() const { return graph_; }
 
-	/*! Get shape of this expression */
+	/*! Get batch size of this expression. */
+	int GetBatchSize() const;
+
+	/*! Get shape of this expression. */
 	Shape GetShape() const;
 
-	/*! Forward compute this expression, return its value */
+	/*! Test if the value of this expression is dense. */
+	bool IsDense() const;
+
+	/*! Test if the value of this expression is sparse. */
+	bool IsSparse() const;
+
+	/*! Forward compute this expression, return its value. */
 	Tensor Forward() const;
 
-	/*! Backward compute this expression, update gradient accumulation in the graph */
+	/*! Backward compute this expression, update gradient accumulation in the graph. */
 	void Backward() const;
 
 	/*! @private */
-	/*! Construct an expression from a graph and node index */
+	/*! Construct an expression from a graph and node index. */
 	Expression(Graph *graph, int index) : graph_(graph), index_(index) {}
 
 	/*! @private */
-	/*! Get node index in graph */
+	/*! Get node index in graph. */
 	int GetNodeIndex() const { return index_; }
 
 private:
