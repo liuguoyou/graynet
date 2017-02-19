@@ -22,12 +22,6 @@ public:
 	/*! Destructor */
 	virtual ~Node();
 
-	/*! Calculate output shape */
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const = 0;
-
-	/*! Get batch size, only used when GetArguments() == 0. */
-	virtual int GetBatchSize() const;
-
 	/*! Get flags for the node. Returns NoFlag by default. */
 	virtual int GetFlags() const;
 

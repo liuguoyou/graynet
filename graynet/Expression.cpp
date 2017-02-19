@@ -32,7 +32,7 @@ void Expression::Backward() const {
 }
 
 template<template<typename, DeviceType> typename FactoryType, typename... TArg>
-static Expression CreateDeviceSpecificNode(Graph *graph, TArg&&... arg) {
+static Expression CreateDeviceSpecificNode(Graph *graph, const Shape &output_shape, TArg&&... arg) {
 	Node *node;
 #ifdef USE_CUDA
 	if (graph->GetDeviceType() == GPU)
@@ -40,7 +40,7 @@ static Expression CreateDeviceSpecificNode(Graph *graph, TArg&&... arg) {
 	else
 #endif
 		node = FactoryType<void, CPU>().Create(std::forward<TArg>(arg)...);
-	return graph->AddNode(node);
+	return graph->AddNode(node, output_shape);
 }
 
 static void *PinMemory(Device *device, const void *data, int size) {
@@ -72,14 +72,6 @@ public:
 		data_ = (float *)PinMemory(graph->GetDevice(), data, size);
 	}
 
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return shape_;
-	}
-
-	virtual int GetBatchSize() const {
-		return batch_size_;
-	}
-
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		float *y_data = y->GetData();
 		int size = batch_size_ * shape_.GetSize() * sizeof(float);
@@ -98,11 +90,11 @@ private:
 };
 
 Expression Input(Graph *graph, const Shape &shape, const float *data) {
-	return graph->AddNode(new InputNode(graph, 1, shape, data));
+	return graph->AddNode(new InputNode(graph, 1, shape, data), shape, false, 1);
 }
 
 Expression BatchInput(Graph *graph, int batch_size, const Shape &shape, const float *data) {
-	return graph->AddNode(new InputNode(graph, batch_size, shape, data));
+	return graph->AddNode(new InputNode(graph, batch_size, shape, data), shape, false, batch_size);
 }
 
 class SparseInputNode : public Node {
@@ -119,14 +111,6 @@ public:
 
 	virtual int GetFlags() const override {
 		return NoAllocateForwardOutput;
-	}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return shape_;
-	}
-
-	virtual int GetBatchSize() const {
-		return batch_size_;
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -157,21 +141,13 @@ private:
 Expression BatchSparseVectorInput(Graph *graph, int batch_size, const Shape &shape,
 	int nonzero_count, const float *sparse_data, const int *batch_indices, const int *indices) {
 	return graph->AddNode(new SparseInputNode(graph, batch_size, shape, nonzero_count,
-		sparse_data, batch_indices, indices));
+		sparse_data, batch_indices, indices), shape, true, batch_size);
 }
 
 template<typename ForwardFunc, typename BackwardFunc>
 class BinaryOpNodeCPU : public Node {
 public:
 	BinaryOpNodeCPU(int lhs_node, int rhs_node) : Node{ lhs_node, rhs_node } {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		const Shape &lhs_shape = x_shapes[0];
-		const Shape &rhs_shape = x_shapes[1];
-		if (lhs_shape != rhs_shape)
-			REPORT_ERROR("Shape of left and right operands mismatch.");
-		return lhs_shape;
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
@@ -262,8 +238,32 @@ struct BinaryOpNodeFactory<CPU, ForwardFunc, BackwardFunc> {
 	}
 };
 
+static Shape GetBroadcastingOutputShape(const Shape &lhs_shape, const Shape &rhs_shape) {
+	// Broadcasting
+	if (lhs_shape.GetDimCount() != rhs_shape.GetDimCount()) {
+		REPORT_ERROR("Input operands have different ranks (%d and %d).",
+			lhs_shape.GetDimCount(), rhs_shape.GetDimCount());
+	}
+	int ndims = lhs_shape.GetDimCount();
+	Shape shape;
+	for (int i = 0; i < ndims; i++) {
+		if (lhs_shape.GetDim(i) == 1)
+			shape.PushDim(rhs_shape.GetDim(i));
+		else if (rhs_shape.GetDim(i) == 1)
+			shape.PushDim(lhs_shape.GetDim(i));
+		else if (lhs_shape.GetDim(i) == rhs_shape.GetDim(i))
+			shape.PushDim(lhs_shape.GetDim(i));
+		else {
+			REPORT_ERROR("Incompatible size at dimension %d: %d and %d.",
+				i, lhs_shape.GetDim(i), rhs_shape.GetDim(i));
+		}
+	}
+	return shape;
+}
+
 template<typename ForwardFunc, typename BackwardFunc>
 static Expression CreateBinaryOpNode(const Expression &lhs, const Expression &rhs) {
+	Shape output_shape = GetBroadcastingOutputShape(lhs.GetShape(), rhs.GetShape());
 	Graph *graph = lhs.GetGraph();
 	Node *node;
 #ifdef USE_CUDA
@@ -272,7 +272,7 @@ static Expression CreateBinaryOpNode(const Expression &lhs, const Expression &rh
 	else
 #endif
 		node = BinaryOpNodeFactory<CPU, ForwardFunc, BackwardFunc>().Create(lhs.GetNodeIndex(), rhs.GetNodeIndex());
-	return graph->AddNode(node);
+	return graph->AddNode(node, output_shape);
 }
 
 Expression operator+(const Expression &lhs, const Expression &rhs) {
@@ -296,10 +296,6 @@ template<typename ForwardFunc, typename BackwardFunc>
 class BinaryLeftScalarOpNodeCPU : public Node {
 public:
 	BinaryLeftScalarOpNodeCPU(float lhs_scalar, int rhs_node) : Node{ rhs_node }, lhs_scalar_(lhs_scalar) {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return x_shapes[0];
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *rhs_data = x[0]->GetData();
@@ -347,7 +343,7 @@ static Expression CreateBinaryLeftScalarOpNode(float lhs_scalar, const Expressio
 	else
 #endif
 		node = BinaryLeftScalarOpNodeFactory<CPU, ForwardFunc, BackwardFunc>().Create(lhs_scalar, rhs.GetNodeIndex());
-	return graph->AddNode(node);
+	return graph->AddNode(node, rhs.GetShape());
 }
 
 Expression operator+(float lhs, const Expression &rhs) {
@@ -370,10 +366,6 @@ template<typename ForwardFunc, typename BackwardFunc>
 class BinaryRightScalarOpNodeCPU : public Node {
 public:
 	BinaryRightScalarOpNodeCPU(int lhs_node, float rhs_scalar) : Node{ lhs_node }, rhs_scalar_(rhs_scalar) {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return x_shapes[0];
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *lhs_data = x[0]->GetData();
@@ -421,7 +413,7 @@ static Expression CreateBinaryRightScalarOpNode(const Expression &lhs, float rhs
 	else
 #endif
 		node = BinaryRightScalarOpNodeFactory<CPU, ForwardFunc, BackwardFunc>().Create(lhs.GetNodeIndex(), rhs_scalar);
-	return graph->AddNode(node);
+	return graph->AddNode(node, lhs.GetShape());
 }
 
 Expression operator+(const Expression &lhs, float rhs) {
@@ -444,10 +436,6 @@ template<typename ForwardFunc, typename BackwardFunc>
 class UnaryOpNodeCPU : public Node {
 public:
 	UnaryOpNodeCPU(int node) : Node{ node } {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return x_shapes[0];
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *x_data = x[0]->GetData();
@@ -489,7 +477,7 @@ static Expression CreateUnaryOpNode(const Expression &x) {
 	else
 #endif
 		node = UnaryOpNodeFactory<CPU, ForwardFunc, BackwardFunc>().Create(x.GetNodeIndex());
-	return graph->AddNode(node);
+	return graph->AddNode(node, x.GetShape());
 }
 
 Expression operator-(const Expression &x) {
@@ -643,37 +631,6 @@ class MatMulNode : public Node {
 public:
 	MatMulNode(int lhs, int rhs) : Node{ lhs, rhs } {}
 
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		const Shape &lhs_shape = x_shapes[0], &rhs_shape = x_shapes[1];
-		if (lhs_shape.GetDimCount() > 2)
-			REPORT_ERROR("Left operand is not a vector or matrix.");
-		if (rhs_shape.GetDimCount() > 2)
-			REPORT_ERROR("Right operand is not a vector or matrix.");
-		if (lhs_shape.GetDimCount() == 1 && rhs_shape.GetDimCount() == 1)
-			REPORT_ERROR("Left and right operands are both vectors, use Dot() for now.");
-		if (lhs_shape.GetDimCount() == 1) {
-			if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0)) {
-				REPORT_ERROR("Dimension mismatch for vector-matrix multiplication: (%d) * (%d, %d).",
-					lhs_shape.GetDim(0), rhs_shape.GetDim(0), rhs_shape.GetDim(1));
-			}
-			return Shape(rhs_shape.GetDim(1));
-		}
-		else if (rhs_shape.GetDimCount() == 1) {
-			if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0)) {
-				REPORT_ERROR("Dimension mismatch for matrix-vector multiplication: (%d) * (%d, %d).",
-					lhs_shape.GetDim(0), lhs_shape.GetDim(1), rhs_shape.GetDim(0));
-			}
-			return Shape(lhs_shape.GetDim(0));
-		}
-		else {
-			if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0)) {
-				REPORT_ERROR("Dimension mismatch for matrix-matrix multiplication: (%d, %d) * (%d, %d).",
-					lhs_shape.GetDim(0), lhs_shape.GetDim(1), rhs_shape.GetDim(0), rhs_shape.GetDim(1));
-			}
-			return Shape(lhs_shape.GetDim(0), rhs_shape.GetDim(1));
-		}
-	}
-
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = L * R
 		const Shape &lhs_shape = x[0]->GetShape();
@@ -729,8 +686,39 @@ public:
 };
 
 Expression MatMul(const Expression &lhs, const Expression &rhs) {
+	/* Infer output shape. */
+	const Shape &lhs_shape = lhs.GetShape(), &rhs_shape = rhs.GetShape();
+	if (lhs_shape.GetDimCount() > 2)
+		REPORT_ERROR("Left operand is not a vector or matrix.");
+	if (rhs_shape.GetDimCount() > 2)
+		REPORT_ERROR("Right operand is not a vector or matrix.");
+	if (lhs_shape.GetDimCount() == 1 && rhs_shape.GetDimCount() == 1)
+		REPORT_ERROR("Left and right operands are both vectors, use Dot() for now.");
+	Shape output_shape;
+	if (lhs_shape.GetDimCount() == 1) {
+		if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0)) {
+			REPORT_ERROR("Dimension mismatch for vector-matrix multiplication: (%d) * (%d, %d).",
+				lhs_shape.GetDim(0), rhs_shape.GetDim(0), rhs_shape.GetDim(1));
+		}
+		output_shape = Shape(rhs_shape.GetDim(1));
+	}
+	else if (rhs_shape.GetDimCount() == 1) {
+		if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0)) {
+			REPORT_ERROR("Dimension mismatch for matrix-vector multiplication: (%d) * (%d, %d).",
+				lhs_shape.GetDim(0), lhs_shape.GetDim(1), rhs_shape.GetDim(0));
+		}
+		output_shape = Shape(lhs_shape.GetDim(0));
+	}
+	else {
+		if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0)) {
+			REPORT_ERROR("Dimension mismatch for matrix-matrix multiplication: (%d, %d) * (%d, %d).",
+				lhs_shape.GetDim(0), lhs_shape.GetDim(1), rhs_shape.GetDim(0), rhs_shape.GetDim(1));
+		}
+		output_shape = Shape(lhs_shape.GetDim(0), rhs_shape.GetDim(1));
+	}
+
 	Graph *graph = lhs.GetGraph();
-	return graph->AddNode(new MatMulNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()));
+	return graph->AddNode(new MatMulNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()), output_shape);
 }
 
 // TODO: Move to more appropriate position
@@ -763,16 +751,6 @@ public:
 
 	virtual int GetFlags() const override {
 		return NoAllocateBackwardOutput;
-	}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		const Shape &lhs_shape = x_shapes[0];
-		const Shape &rhs_shape = x_shapes[1];
-		if (lhs_shape.GetDimCount() != 1 || rhs_shape.GetDimCount() != 1)
-			REPORT_ERROR("Dot only supports vector inputs.");
-		if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0))
-			REPORT_ERROR("Length of dot operands mismatch.");
-		return Shape(1);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -854,8 +832,14 @@ private:
 };
 
 Expression Dot(const Expression &lhs, const Expression &rhs) {
+	const Shape &lhs_shape = lhs.GetShape(), &rhs_shape = rhs.GetShape();
+	if (lhs_shape.GetDimCount() != 1 || rhs_shape.GetDimCount() != 1)
+		REPORT_ERROR("Dot only supports vector inputs.");
+	if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0))
+		REPORT_ERROR("Length of dot operands mismatch.");
+
 	Graph *graph = lhs.GetGraph();
-	return graph->AddNode(new SparseDotNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()));
+	return graph->AddNode(new SparseDotNode(lhs.GetNodeIndex(), rhs.GetNodeIndex()), Shape(1));
 }
 
 static Shape FilterForwardShape(const Shape &x_shape, const Shape &filter_shape,
@@ -911,12 +895,6 @@ public:
 		CUDNN_CALL(cudnnDestroyTensorDescriptor(x_desc_));
 		CUDNN_CALL(cudnnDestroyTensorDescriptor(y_desc_));
 #endif
-	}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		const Shape &x_shape = x_shapes[0];
-		const Shape &filter_shape = x_shapes[1];
-		return FilterForwardShape(x_shape, filter_shape, strides_, padding_, false);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -1012,8 +990,11 @@ private:
 };
 
 Expression Convolution(const Expression &x, const Expression &filter, const Shape &strides, const Shape &padding) {
+	const Shape &x_shape = x.GetShape(), &filter_shape = filter.GetShape();
+	Shape output_shape = FilterForwardShape(x_shape, filter_shape, strides, padding, false);
+
 	Graph *graph = filter.GetGraph();
-	return graph->AddNode(new ConvolutionNode(x.GetNodeIndex(), filter.GetNodeIndex(), strides, padding));
+	return graph->AddNode(new ConvolutionNode(x.GetNodeIndex(), filter.GetNodeIndex(), strides, padding), output_shape);
 }
 
 class PoolingNode : public Node {
@@ -1035,11 +1016,6 @@ public:
 		CUDNN_CALL(cudnnDestroyPoolingDescriptor(pooling_desc_));
 		CUDNN_CALL(cudnnDestroyTensorDescriptor(x_desc_));
 		CUDNN_CALL(cudnnDestroyTensorDescriptor(y_desc_));
-	}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		const Shape &x_shape = x_shapes[0];
-		return FilterForwardShape(x_shape, filter_shape_, strides_, padding_, true);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -1110,25 +1086,20 @@ private:
 };
 
 Expression MaxPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding) {
+	Shape output_shape = FilterForwardShape(x.GetShape(), filter_shape, strides, padding, true);
 	Graph *graph = x.GetGraph();
-	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding, PoolingNode::MaxPooling));
+	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding, PoolingNode::MaxPooling), output_shape);
 }
 
 Expression AvgPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding) {
+	Shape output_shape = FilterForwardShape(x.GetShape(), filter_shape, strides, padding, true);
 	Graph *graph = x.GetGraph();
-	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding, PoolingNode::AvgPooling));
+	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding, PoolingNode::AvgPooling), output_shape);
 }
 
 class ReshapeNode : public Node {
 public:
 	ReshapeNode(int node, const Shape &shape) : Node{ node }, shape_(shape) {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		if (x_shapes[0].GetSize() != shape_.GetSize())
-			REPORT_ERROR("Total size of input (%d) and requested shape (%d) mismatch.",
-				x_shapes[0].GetSize(), shape_.GetSize());
-		return shape_;
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		float *x_data = (float*)x[0]->GetData();
@@ -1156,17 +1127,17 @@ private:
 };
 
 Expression Reshape(const Expression &x, const Shape &shape) {
+	if (x.GetShape().GetSize() != shape.GetSize()) {
+		REPORT_ERROR("Total size of input (%d) and requested shape (%d) mismatch.",
+			x.GetShape().GetSize(), shape.GetSize());
+	}
 	Graph *graph = x.GetGraph();
-	return graph->AddNode(new ReshapeNode(x.GetNodeIndex(), shape));
+	return graph->AddNode(new ReshapeNode(x.GetNodeIndex(), shape), shape);
 }
 
 class ReduceSumNodeCPU : public Node {
 public:
 	ReduceSumNodeCPU(int node) : Node{ node } {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return Shape(1);
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *x_data = (float*)x[0]->GetData();
@@ -1203,18 +1174,12 @@ struct ReduceSumNodeFactory<Dummy, CPU> {
 
 Expression ReduceSum(const Expression &x) {
 	Graph *graph = x.GetGraph();
-	return CreateDeviceSpecificNode<ReduceSumNodeFactory>(graph, x.GetNodeIndex());
+	return CreateDeviceSpecificNode<ReduceSumNodeFactory>(graph, Shape(1), x.GetNodeIndex());
 }
 
 class SliceNodeCPU : public Node {
 public:
 	SliceNodeCPU(int node, const Shape &start, const Shape &size) : Node{ node }, start_(start), size_(size) {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		if (start_.GetDimCount() != 1 || size_.GetDimCount() != 1)
-			DEBUG_BREAK();
-		return size_;
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		if (x[0]->GetBatchSize() != 1)
@@ -1245,16 +1210,25 @@ struct SliceNodeFactory<Dummy, CPU> {
 };
 
 Expression Slice(const Expression &x, const Shape &start, const Shape &size) {
-	return CreateDeviceSpecificNode<SliceNodeFactory>(x.GetGraph(), x.GetNodeIndex(), start, size);
+	const Shape &shape = x.GetShape();
+	if (start.GetDimCount() != size.GetDimCount())
+		REPORT_ERROR("Rank mismatch for start and size parameters.");
+	if (shape.GetDimCount() != start.GetDimCount())
+		REPORT_ERROR("Rank mismatch for input and given slicing range.");
+	for (int i = 0; i < start.GetDimCount(); i++) {
+		if (start.GetDim(i) < 0 || start.GetDim(i) >= shape.GetDim(i)
+			|| start.GetDim(i) + size.GetDim(i) > shape.GetDim(i)) {
+			REPORT_ERROR("Slicing out of range for dimension: %d. "
+				"Input range: [0, %d). Requested range: [%d, %d).",
+				i, 0, shape.GetDim(i), start.GetDim(i), start.GetDim(i) + size.GetDim(i));
+		}
+	}
+	return CreateDeviceSpecificNode<SliceNodeFactory>(x.GetGraph(), size, x.GetNodeIndex(), start, size);
 }
 
 class SoftmaxNodeCPU : public Node {
 public:
 	SoftmaxNodeCPU(int node) : Node{ node } {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return x_shapes[0];
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = exp(x_i) / sum(exp(x_i))
@@ -1317,7 +1291,7 @@ struct SoftmaxNodeFactory<Dummy, CPU> {
 
 Expression Softmax(const Expression &x) {
 	Graph *graph = x.GetGraph();
-	return CreateDeviceSpecificNode<SoftmaxNodeFactory>(graph, x.GetNodeIndex());
+	return CreateDeviceSpecificNode<SoftmaxNodeFactory>(graph, x.GetShape(), x.GetNodeIndex());
 }
 
 Expression SoftMargin(const Expression &x, const Expression &label) {
@@ -1335,12 +1309,6 @@ Expression BinaryClassificationAccuracy(const Expression &x, const Expression &l
 class CrossEntropyNodeCPU : public Node {
 public:
 	CrossEntropyNodeCPU(Graph *graph, int node, const std::vector<int> &labels) : Node{ node }, labels_(labels) {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		Shape shape = x_shapes[0];
-		shape.SetDim(shape.GetDimCount() - 1, 1);
-		return shape;
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = -log(x_k)
@@ -1387,22 +1355,18 @@ struct CrossEntropyNodeFactory<Dummy, CPU> {
 };
 
 Expression CrossEntropy(const Expression &x, int size, const int *labels) {
+	Shape shape = x.GetShape();
+	shape.SetDim(shape.GetDimCount() - 1, 1);
 	Graph *graph = x.GetGraph();
 	std::vector<int> l;
 	for (int i = 0; i < size; i++)
 		l.push_back(labels[i]);
-	return CreateDeviceSpecificNode<CrossEntropyNodeFactory>(graph, graph, x.GetNodeIndex(), l);
+	return CreateDeviceSpecificNode<CrossEntropyNodeFactory>(graph, shape, graph, x.GetNodeIndex(), l);
 }
 
 class ClassificationAccuracyNodeCPU : public Node {
 public:
 	ClassificationAccuracyNodeCPU(Graph *graph, int node, const std::vector<int> &labels) : Node{ node }, labels_(labels) {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		Shape shape = x_shapes[0];
-		shape.SetDim(shape.GetDimCount() - 1, 1);
-		return shape;
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = -log(x_k)
@@ -1444,9 +1408,11 @@ struct ClassificationAccuracyNodeFactory<Dummy, CPU> {
 };
 
 Expression ClassificationAccuracy(const Expression &x, int size, const int *labels) {
+	Shape shape = x.GetShape();
+	shape.SetDim(shape.GetDimCount() - 1, 1);
 	Graph *graph = x.GetGraph();
 	std::vector<int> l;
 	for (int i = 0; i < size; i++)
 		l.push_back(labels[i]);
-	return CreateDeviceSpecificNode<ClassificationAccuracyNodeFactory>(graph, graph, x.GetNodeIndex(), l);
+	return CreateDeviceSpecificNode<ClassificationAccuracyNodeFactory>(graph, shape, graph, x.GetNodeIndex(), l);
 }

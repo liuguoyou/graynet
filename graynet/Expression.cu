@@ -188,31 +188,6 @@ class BinaryOpNodeGPU : public Node {
 public:
 	BinaryOpNodeGPU(int lhs_node, int rhs_node) : Node{ lhs_node, rhs_node } {}
 
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		const Shape &lhs_shape = x_shapes[0];
-		const Shape &rhs_shape = x_shapes[1];
-		// Broadcasting
-		if (lhs_shape.GetDimCount() != rhs_shape.GetDimCount()) {
-			REPORT_ERROR("Input operands have different ranks (%d and %d).",
-				lhs_shape.GetDimCount(), rhs_shape.GetDimCount());
-		}
-		int ndims = lhs_shape.GetDimCount();
-		Shape shape;
-		for (int i = 0; i < ndims; i++) {
-			if (lhs_shape.GetDim(i) == 1)
-				shape.PushDim(rhs_shape.GetDim(i));
-			else if (rhs_shape.GetDim(i) == 1)
-				shape.PushDim(lhs_shape.GetDim(i));
-			else if (lhs_shape.GetDim(i) == rhs_shape.GetDim(i))
-				shape.PushDim(lhs_shape.GetDim(i));
-			else {
-				REPORT_ERROR("Incompatible size at dimension %d: %d and %d.",
-					i, lhs_shape.GetDim(i), rhs_shape.GetDim(i));
-			}
-		}
-		return shape;
-	}
-
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
 		int size = y->GetShape().GetSize();
@@ -339,10 +314,6 @@ class BinaryLeftScalarOpNodeGPU : public Node {
 public:
 	BinaryLeftScalarOpNodeGPU(float lhs_scalar, int rhs_node) : Node{ rhs_node }, lhs_scalar_(lhs_scalar) {}
 
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return x_shapes[0];
-	}
-
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *rhs_data = x[0]->GetData();
 		int size = y->GetShape().GetSize() * x[0]->GetBatchSize();
@@ -406,11 +377,7 @@ template<typename ForwardFunc, typename BackwardFunc>
 class BinaryRightScalarOpNodeGPU : public Node {
 public:
 	BinaryRightScalarOpNodeGPU(int lhs_node, float rhs_scalar) : Node{ lhs_node }, rhs_scalar_(rhs_scalar) {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return x_shapes[0];
-	}
-
+	
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *lhs_data = x[0]->GetData();
 		int size = y->GetShape().GetSize() * x[0]->GetBatchSize();
@@ -475,10 +442,6 @@ class UnaryOpNodeGPU : public Node {
 public:
 	UnaryOpNodeGPU(int node) : Node{ node } {}
 
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return x_shapes[0];
-	}
-
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *x_data = x[0]->GetData();
 		int size = y->GetShape().GetSize() * x[0]->GetBatchSize();
@@ -531,10 +494,6 @@ static __global__ void ReduceSumBackwardKernel(int nelems, int size,
 class ReduceSumNodeGPU : public Node {
 public:
 	ReduceSumNodeGPU(int node) : Node{ node } {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return Shape(1);
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *x_data = (float*)x[0]->GetData();
@@ -613,23 +572,6 @@ class SliceNodeGPU : public Node {
 public:
 	SliceNodeGPU(int node, const Shape &start, const Shape &size) : Node{ node }, start_(start), size_(size) {}
 
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		const Shape &shape = x_shapes[0];
-		if (start_.GetDimCount() != size_.GetDimCount())
-			REPORT_ERROR("Rank mismatch for start and size parameters.");
-		if (shape.GetDimCount() != start_.GetDimCount())
-			REPORT_ERROR("Rank mismatch for input and given slicing range.");
-		for (int i = 0; i < start_.GetDimCount(); i++) {
-			if (start_.GetDim(i) < 0 || start_.GetDim(i) >= shape.GetDim(i)
-				|| start_.GetDim(i) + size_.GetDim(i) > shape.GetDim(i)) {
-				REPORT_ERROR("Slicing out of range for dimension: %d. "
-					"Input range: [0, %d). Requested range: [%d, %d).",
-					i, 0, shape.GetDim(i), start_.GetDim(i), start_.GetDim(i) + size_.GetDim(i));
-			}
-		}
-		return size_;
-	}
-
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		int ndims = x[0]->GetShape().GetDimCount() + 1;
 		GetTensorStrides(x[0], desc_.strides);
@@ -674,10 +616,6 @@ template struct SliceNodeFactory<void, GPU>;
 class SoftmaxNodeGPU : public Node {
 public:
 	SoftmaxNodeGPU(int node) : Node{ node } {}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		return x_shapes[0];
-	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = exp(x_i) / sum(exp(x_i))
@@ -758,12 +696,6 @@ public:
 		CUDA_CALL(cudaMemcpyAsync(labels_data_, labels_pinned, size, cudaMemcpyHostToDevice));
 	}
 
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		Shape shape = x_shapes[0];
-		shape.SetDim(shape.GetDimCount() - 1, 1);
-		return shape;
-	}
-
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const Shape &input_shape = x[0]->GetShape();
 		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
@@ -836,12 +768,6 @@ public:
 		memcpy(labels_pinned, labels.data(), size);
 		labels_data_ = (int *)graph->GetDevice()->AllocateMemory(size, Device::ScratchMemoryPool);
 		CUDA_CALL(cudaMemcpyAsync(labels_data_, labels_pinned, size, cudaMemcpyHostToDevice));
-	}
-
-	virtual Shape ForwardShape(const std::vector<Shape> &x_shapes) const override {
-		Shape shape = x_shapes[0];
-		shape.SetDim(shape.GetDimCount() - 1, 1);
-		return shape;
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {

@@ -255,16 +255,16 @@ bool Graph::CheckGradient(const Expression &loss, bool verbose) {
 	return ret;
 }
 
-Expression Graph::AddNode(Node *node) {
+Expression Graph::AddNode(Node *node, const Shape &output_shape, bool sparse_output, int batch_size) {
 	d->nodes_.push_back(node);
 	d->input_shape_scratch_.clear();
 	for (int input_id : node->GetArguments())
 		d->input_shape_scratch_.push_back(GetNodeShape(input_id));
-	// Calculate batch size
-	int batch_size = 1;
-	if (node->GetArguments().empty())
-		batch_size = node->GetBatchSize();
-	else {
+	// No predefined batch size given, calculate batch size based on input arguments
+	if (batch_size == -1) {
+		if (node->GetArguments().empty())
+			DEBUG_BREAK();
+		batch_size = 1;
 		// Make sure all inputs agree on batch size
 		for (int input_id : node->GetArguments()) {
 			int cur_batch_size = GetNodeBatchSize(input_id);
@@ -276,9 +276,8 @@ Expression Graph::AddNode(Node *node) {
 				REPORT_ERROR("Batch size mismatch: %d and %d.", batch_size, cur_batch_size);
 		}
 	}
-	Shape shape = node->ForwardShape(d->input_shape_scratch_);
-	d->outputs_.push_back(Tensor(GetDeviceType(), batch_size, shape, nullptr));
-	d->gradients_.push_back(Tensor(GetDeviceType(), batch_size, shape, nullptr));
+	d->outputs_.push_back(Tensor(GetDeviceType(), batch_size, output_shape, nullptr));
+	d->gradients_.push_back(Tensor(GetDeviceType(), batch_size, output_shape, nullptr));
 
 	int id = (int)d->nodes_.size() - 1;
 	return Expression(this, id);

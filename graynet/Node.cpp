@@ -6,11 +6,6 @@
 Node::~Node() {
 }
 
-int Node::GetBatchSize() const {
-	DEBUG_BREAK();
-	abort();
-}
-
 int Node::GetFlags() const {
 	return 0;
 }

@@ -13,6 +13,10 @@
 
 #define REPORT_ERROR(msg, ...) ReportError(msg, __VA_ARGS__)
 
+// Simple rule on whether to use DEBUG_BREAK() or REPORT_ERROR()
+// * If it means a bug in graynet, use DEBUG_BREAK().
+// * If it is outside our control, use REPORT_ERROR() with a proper error message.
+
 #ifdef USE_CUDA
 #include <cstdio>
 
