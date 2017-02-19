@@ -156,29 +156,6 @@ static void TransformReduce(TransformFunc transform_func, ReduceFunc reduce_func
 	}
 }
 
-static void GetTensorStrides(const Tensor *tensor, int strides[kMaxTensorDim + 1]) {
-	int batch_size = tensor->GetBatchSize();
-	const Shape &shape = tensor->GetShape();
-	int ndims = 1 + shape.GetDimCount();
-	int cur = 1;
-	for (int i = ndims - 1; i >= 1; i--) {
-		if (shape.GetDim(i - 1) == 1)
-			strides[i] = 0;
-		else {
-			strides[i] = cur;
-			cur *= shape.GetDim(i - 1);
-		}
-	}
-	strides[0] = (batch_size == 1) ? 0 : cur;
-}
-
-static void GetTensorDims(const Tensor *tensor, int dims[kMaxTensorDim + 1]) {
-	dims[0] = tensor->GetBatchSize();
-	const Shape &shape = tensor->GetShape();
-	for (int i = 0; i < shape.GetDimCount(); i++)
-		dims[i + 1] = shape.GetDim(i);
-}
-
 struct BinaryReduceDesc {
 	int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
 	int strides[kMaxTensorDim + 1];

@@ -2,6 +2,24 @@
 
 /*! This is an internal header file */
 
+/*! \cond NOSHOW */
+
+#include <type_traits>
+
+namespace detail {
+	template <class F, class Tuple, std::size_t... I>
+	constexpr decltype(auto) apply_impl(F &&f, Tuple &&t, std::index_sequence<I...>) {
+		return std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))...);
+	}
+}  // namespace detail
+
+template <class F, class Tuple>
+constexpr decltype(auto) apply(F &&f, Tuple &&t) {
+	return detail::apply_impl(
+		std::forward<F>(f), std::forward<Tuple>(t),
+		std::make_index_sequence<std::tuple_size<typename std::decay<Tuple>::type>::value>{});
+}
+
 #ifdef _MSC_VER
 #define DEBUG_BREAK()	__debugbreak()
 #else
@@ -61,3 +79,5 @@ const char *GetCuSPARSEErrorString(int status);
 	} while (0)
 
 #endif
+
+/*! \endcond */

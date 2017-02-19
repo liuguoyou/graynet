@@ -5,6 +5,7 @@
 #include "Node.h"
 #include "Utils.h"
 
+#include <array>
 #include <cblas.h>
 #include <cstdlib>
 #include <cstring>
@@ -155,6 +156,48 @@ Expression BatchSparseVectorInput(Graph *graph, int batch_size, const Shape &sha
 		sparse_data, batch_indices, indices), shape, true, batch_size);
 }
 
+namespace {
+	template<int N, int I, int M, typename TransformFunc>
+	struct TransformKernel {
+		void Transform(TransformFunc transform_func, const int *dims,
+			const std::array<const int *, M> &strides, const std::array<int, M> &bases) {
+			std::array<int, M> cur = bases;
+			for (int j = 0; j < dims[I]; j++) {
+				TransformKernel<N, I + 1, M, TransformFunc>().Transform(transform_func, dims, strides, cur);
+				for (int k = 0; k < M; k++)
+					cur[k] += strides[k][I];
+			}
+		}
+	};
+
+	template<int N, int M, typename TransformFunc>
+	struct TransformKernel<N, N, M, TransformFunc> {
+		void Transform(TransformFunc transform_func, const int *dims,
+			const std::array<const int *, M> &strides, const std::array<int, M> &bases) {
+			apply(transform_func, bases);
+		}
+	};
+}
+
+template<int M, typename TransformFunc>
+static void Transform(TransformFunc transform_func, int N, const int *dims,
+	const std::array<const int *, M> &strides) {
+	std::array<int, M> bases{};
+	switch (N) {
+	case 1: TransformKernel<1, 0, M, TransformFunc>().Transform(transform_func, dims, strides, bases); break;
+	case 2: TransformKernel<2, 0, M, TransformFunc>().Transform(transform_func, dims, strides, bases); break;
+	case 3: TransformKernel<3, 0, M, TransformFunc>().Transform(transform_func, dims, strides, bases); break;
+	case 4: TransformKernel<4, 0, M, TransformFunc>().Transform(transform_func, dims, strides, bases); break;
+	case 5: TransformKernel<5, 0, M, TransformFunc>().Transform(transform_func, dims, strides, bases); break;
+	case 6: TransformKernel<6, 0, M, TransformFunc>().Transform(transform_func, dims, strides, bases); break;
+	case 7: TransformKernel<7, 0, M, TransformFunc>().Transform(transform_func, dims, strides, bases); break;
+	case 8: TransformKernel<8, 0, M, TransformFunc>().Transform(transform_func, dims, strides, bases); break;
+	default:
+		static_assert(8 == kMaxTensorDim + 1, "");
+		DEBUG_BREAK();
+	}
+}
+
 template<typename ForwardFunc, typename BackwardFunc>
 class BinaryOpNodeCPU : public Node {
 public:
@@ -162,35 +205,19 @@ public:
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
-		int size = y->GetShape().GetSize();
 		float *y_data = y->GetData();
-		int left_batch_size = x[0]->GetBatchSize(), right_batch_size = x[1]->GetBatchSize();
-		// TODO: Simplify broadcast logic, avoid repeating code
-		if (left_batch_size == right_batch_size) {
-			size *= left_batch_size;
-			for (int i = 0; i < size; i++)
-				y_data[i] = ForwardFunc()(lhs_data[i], rhs_data[i]);
-		}
-		else if (left_batch_size == 1) {
-			// Broadcast left
-			int j = 0;
-			for (int batch_id = 0; batch_id < right_batch_size; batch_id++)
-				for (int i = 0; i < size; i++) {
-					y_data[j] = ForwardFunc()(lhs_data[i], rhs_data[j]);
-					j++;
-				}
-		}
-		else if (right_batch_size == 1) {
-			// Broadcast right
-			int j = 0;
-			for (int batch_id = 0; batch_id < left_batch_size; batch_id++)
-				for (int i = 0; i < size; i++) {
-					y_data[j] = ForwardFunc()(lhs_data[j], rhs_data[i]);
-					j++;
-				}
-		}
-		else
-			DEBUG_BREAK();
+		int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
+		int y_strides[kMaxTensorDim + 1];
+		GetTensorStrides(x[0], lhs_strides);
+		GetTensorStrides(x[1], rhs_strides);
+		GetTensorStrides(y, y_strides);
+		int ndims = y->GetShape().GetDimCount() + 1;
+		int dims[kMaxTensorDim + 1];
+		GetTensorDims(y, dims);
+		auto transform_func = [&](int lhs_index, int rhs_index, int y_index) {
+			y_data[y_index] = ForwardFunc()(lhs_data[lhs_index], rhs_data[rhs_index]);
+		};
+		Transform<3>(transform_func, ndims, dims, { lhs_strides, rhs_strides, y_strides });
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
@@ -202,43 +229,21 @@ public:
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();
 		float *dEdL_data = dEdX[0]->GetData(), *dEdR_data = dEdX[1]->GetData();
-		int size = y->GetShape().GetSize();
-		int left_batch_size = x[0]->GetBatchSize(), right_batch_size = x[1]->GetBatchSize();
-		if (left_batch_size == right_batch_size) {
-			size *= left_batch_size;
-			for (int i = 0; i < size; i++) {
-				float dYdL, dYdR;
-				BackwardFunc()(lhs_data[i], rhs_data[i], y_data[i], &dYdL, &dYdR);
-				dEdL_data[i] += dYdL * dEdY_data[i];
-				dEdR_data[i] += dYdR * dEdY_data[i];
-			}
-		}
-		else if (left_batch_size == 1) {
-			// Broadcast left
-			int j = 0;
-			for (int batch_id = 0; batch_id < right_batch_size; batch_id++)
-				for (int i = 0; i < size; i++) {
-					float dYdL, dYdR;
-					BackwardFunc()(lhs_data[i], rhs_data[j], y_data[j], &dYdL, &dYdR);
-					dEdL_data[i] += dYdL * dEdY_data[j];
-					dEdR_data[j] += dYdR * dEdY_data[j];
-					j++;
-				}
-		}
-		else if (right_batch_size == 1) {
-			// Broadcast right
-			int j = 0;
-			for (int batch_id = 0; batch_id < left_batch_size; batch_id++)
-				for (int i = 0; i < size; i++) {
-					float dYdL, dYdR;
-					BackwardFunc()(lhs_data[j], rhs_data[i], y_data[j], &dYdL, &dYdR);
-					dEdL_data[j] += dYdL * dEdY_data[j];
-					dEdR_data[i] += dYdR * dEdY_data[j];
-					j++;
-				}
-		}
-		else
-			DEBUG_BREAK();
+		int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
+		int y_strides[kMaxTensorDim + 1];
+		GetTensorStrides(x[0], lhs_strides);
+		GetTensorStrides(x[1], rhs_strides);
+		GetTensorStrides(y, y_strides);
+		int ndims = y->GetShape().GetDimCount() + 1;
+		int dims[kMaxTensorDim + 1];
+		GetTensorDims(y, dims);
+		auto transform_func = [&](int lhs_index, int rhs_index, int y_index) {
+			float dYdL, dYdR;
+			BackwardFunc()(lhs_data[lhs_index], rhs_data[rhs_index], y_data[y_index], &dYdL, &dYdR);
+			dEdL_data[lhs_index] += dYdL * dEdY_data[y_index];
+			dEdR_data[rhs_index] += dYdR * dEdY_data[y_index];
+		};
+		Transform<3>(transform_func, ndims, dims, { lhs_strides, rhs_strides, y_strides });
 	}
 };
 
