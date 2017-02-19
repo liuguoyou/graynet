@@ -206,6 +206,9 @@ Expression AvgPooling(const Expression &x, const Shape &filter_shape, const Shap
 /*! Reshape tensor */
 Expression Reshape(const Expression &x, const Shape &shape);
 
+/*! Flatten a multi-dimensional tensor to 1-D. This is equivalent to `Reshape(x, Shape(x.GetShape().GetSize()))`. */
+Expression Flatten(const Expression &x);
+
 /*! Reduce one dimension */
 Expression ReduceSum(const Expression &x);
 

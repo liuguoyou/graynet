@@ -1101,6 +1101,10 @@ Expression Reshape(const Expression &x, const Shape &shape) {
 	return graph->AddNode(new ReshapeNode(x.GetNodeIndex(), shape), shape);
 }
 
+Expression Flatten(const Expression &x) {
+	return Reshape(x, Shape(x.GetShape().GetSize()));
+}
+
 class ReduceSumNodeCPU : public Node {
 public:
 	ReduceSumNodeCPU(int node) : Node{ node } {}
