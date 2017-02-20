@@ -74,12 +74,14 @@ static __global__ void TransformReduceKernel(TransformFunc transform_func, Reduc
 	__shared__ typename BlockReduceT::TempStorage temp_storage;
 
 	int regular_idx = blockIdx.x;
-	int reduce_idx_base = threadIdx.x * reduces_per_thread;
+	int reduce_idx_base = threadIdx.x;
 	int base_idx = GetTensorStorageIndex(regular_idx, dims, reduce_desc.regular_sizes, reduce_desc.strides);
 	// First element
 	int index = base_idx + GetTensorStorageIndex(reduce_idx_base, dims, reduce_desc.reduce_sizes, reduce_desc.strides);
 	float value = transform_func(index, extra_data);
-	for (int reduce_idx = reduce_idx_base + 1; reduce_idx < reduce_idx_base + reduces_per_thread; reduce_idx++) {
+	int reduce_idx = reduce_idx_base;
+	for (int i = 1; i < reduces_per_thread; i++) {
+		reduce_idx += blockDim.x;
 		if (reduce_idx < reduce_total) {
 			int index = base_idx + GetTensorStorageIndex(reduce_idx, dims, reduce_desc.reduce_sizes, reduce_desc.strides);
 			float cur_value = transform_func(index, extra_data);
@@ -564,7 +566,7 @@ public:
 		int threadsPerBlock = kThreadsPerBlock;
 		int blocksPerGrid = (nelems + threadsPerBlock - 1) / threadsPerBlock;
 		ReduceSumBackwardKernel<<<blocksPerGrid, threadsPerBlock>>>(
-			nelems * size, size, dEdY_data, dEdX_data);
+			nelems, size, dEdY_data, dEdX_data);
 	}
 };
 

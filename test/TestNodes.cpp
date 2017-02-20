@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <graynet/graynet.h>
+#include <random>
 
 class NodeTest: public testing::Test {
 public:
@@ -22,8 +23,18 @@ public:
 		delete actual;
 	}
 
+	float *GenerateTestData(const Shape &shape) {
+		int count = shape.GetSize();
+		float *x = new float[count];
+		std::uniform_real_distribution<float> dist(0.f, 1.f);
+		for (int i = 0; i < count; i++)
+			x[i] = dist(gen);
+		return x;
+	}
+
 	Device device;
 	Graph graph;
+	std::mt19937 gen{ 0 };
 };
 
 TEST_F(NodeTest, SimpleBatchTest) {
@@ -283,6 +294,19 @@ TEST_F(NodeTest, ReduceSumBatched1D) {
 		1.5f,
 	};
 	CheckValue(x, expected);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, ReduceSumLarge) {
+	int count = 1025;
+	float *x_data = GenerateTestData(Shape(count));
+	float sum = 0;
+	for (int i = 0; i < count; i++)
+		sum += x_data[i];
+	Expression x = Input(&graph, Shape(count), x_data);
+	delete x_data;
+	x = ReduceSum(x);
+	CheckValue(x, &sum);
 	CheckGradient(x);
 }
 
