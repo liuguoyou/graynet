@@ -1157,24 +1157,38 @@ public:
 	SliceNodeCPU(int node, const Shape &start, const Shape &size) : Node{ node }, start_(start), size_(size) {}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
-		if (x[0]->GetBatchSize() != 1)
-			DEBUG_BREAK();
-		float *ptr = x[0]->GetData() + start_.GetDim(0);
-		int size = size_.GetDim(0) * sizeof(float);
-		graph->GetDevice()->CopyMemory(y->GetData(), ptr, size);
+		const float *x_data = x[0]->GetData();
+		float *y_data = y->GetData();
+		int ndims = x[0]->GetShape().GetDimCount() + 1;
+		GetTensorStrides(x[0], x_strides_);
+		GetTensorStrides(y, y_strides_);
+		GetTensorDims(y, dims_);
+		base_index_ = 0;
+		for (int i = 1; i < ndims; i++)
+			base_index_ += x_strides_[i] * start_.GetDim(i - 1);
+
+		auto transform_func = [&](int x_index, int y_index) {
+			y_data[y_index] = x_data[base_index_ + x_index];
+		};
+		Transform<2>(transform_func, ndims, dims_, { x_strides_, y_strides_ });
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
 		const float *dEdY_data = dEdY->GetData();
 		float *dEdX_data = dEdX[0]->GetData();
-		int count = size_.GetDim(0);
-		float *ptr = dEdX_data + start_.GetDim(0);
-		cblas_saxpy(count, 1.f, dEdY_data, 1, ptr, 1);
+		int ndims = x[0]->GetShape().GetDimCount() + 1;
+
+		auto transform_func = [&](int x_index, int y_index) {
+			dEdX_data[base_index_ + x_index] += dEdY_data[y_index];
+		};
+		Transform<2>(transform_func, ndims, dims_, { x_strides_, y_strides_ });
 	}
 
 private:
 	Shape start_, size_;
+	mutable int x_strides_[kMaxTensorDim + 1], y_strides_[kMaxTensorDim + 1], dims_[kMaxTensorDim + 1];
+	mutable int base_index_;
 };
 
 template<typename Dummy>

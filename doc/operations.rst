@@ -33,7 +33,7 @@ For example, consider the following tensors:
        [ 7 8 9 ]      [ 3 ]
 
 where `x` has shape `(3, 3)` and `y` has shape `(3, 1)`. When doing `x + y`, the second dimension of `y` will be broadcasted to the same size as of `x`.
-Logically, it is like expanding `y` to:
+Logically, it is like expanding `y` to `(3, 3)`:
 
 .. code-block:: none
 

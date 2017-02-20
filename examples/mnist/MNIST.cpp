@@ -65,7 +65,7 @@ static std::vector<DataPoint> LoadMNIST(const char *image_filename, const char *
 }
 
 static Expression Model(Expression t) {
-#if 0
+#if 1
 	t = ReLU(LinearLayer("l1", t, 128));
 	t = ReLU(LinearLayer("l2", t, 64));
 	t = Softmax(LinearLayer("l3", t, 10));
@@ -74,7 +74,7 @@ static Expression Model(Expression t) {
 	t = ReLU(ConvolutionLayer("conv1", t, 32, Shape(3, 3), Shape(1, 1), Shape(0, 0)));
 	t = ReLU(ConvolutionLayer("conv2", t, 16, Shape(3, 3), Shape(1, 1), Shape(0, 0)));
 	t = MaxPooling(t, Shape(3, 3), Shape(1, 1), Shape(0, 0));
-	t = Reshape(t, Shape(7744));
+	t = Flatten(t);
 	t = ReLU(LinearLayer("l1", t, 128));
 	t = Softmax(LinearLayer("l2", t, 10));
 #endif
