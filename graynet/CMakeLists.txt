@@ -23,7 +23,7 @@ set(SRCS
 
 add_source_groups(${SRCS})
 
-if(${CUDA_FOUND})
+if(${GRAYNET_USE_CUDA})
 	set(SRCS ${SRCS};Expression.cu)
 	set_source_files_properties(Optimizer.cpp PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
 	add_definitions(-DUSE_CUDA)
@@ -31,6 +31,7 @@ if(${CUDA_FOUND})
 	include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty)
 	set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} --gpu-architecture=compute_35 --gpu-code=sm_35,sm_50,sm_52,sm_60 --expt-extended-lambda")
 	cuda_add_library(graynet STATIC ${SRCS})
+	cuda_add_cublas_to_target(graynet)
 	if(MSVC)
 		set(CUDNN_LIBRARIES ${CUDNN_ROOT}/lib/x64/cudnn.lib)
 	else()
@@ -39,8 +40,6 @@ if(${CUDA_FOUND})
 else()
 	add_library(graynet STATIC ${SRCS})
 endif()
-
-cuda_add_cublas_to_target(graynet)
 
 target_link_libraries(graynet ${BLAS_LIBRARIES} ${CUDNN_LIBRARIES} ${CUDA_cusparse_LIBRARY})
 

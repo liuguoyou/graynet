@@ -26,6 +26,7 @@ static void saxpy(Device *device, int count, float alpha, const float *from, flo
 		cblas_saxpy(count, alpha, from, 1, to, 1);
 }
 
+#ifdef USE_CUDA
 // TODO: Use CUB for better performance
 template<typename TransformFunc>
 static __global__ void TransformKernel2(int N, const float *from1, const float *from2,
@@ -35,6 +36,7 @@ static __global__ void TransformKernel2(int N, const float *from1, const float *
 		to[i] = func(from1[i], from2[i]);
 	}
 }
+#endif
 
 template<typename TransformFunc>
 static void Transform2(Device *device, int N, const float *from1, const float *from2,
@@ -53,6 +55,7 @@ static void Transform2(Device *device, int N, const float *from1, const float *f
 	}
 }
 
+#ifdef USE_CUDA
 // TODO: Use CUB for better performance
 template<typename TransformFunc>
 static __global__ void TransformKernel3(int N, const float *from1, const float *from2,
@@ -62,6 +65,7 @@ static __global__ void TransformKernel3(int N, const float *from1, const float *
 		to[i] = func(from1[i], from2[i], from3[i]);
 	}
 }
+#endif
 
 template<typename TransformFunc>
 static void Transform3(Device *device, int N, const float *from1, const float *from2,

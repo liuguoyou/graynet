@@ -2,7 +2,13 @@ cmake_minimum_required(VERSION 3.3.0 FATAL_ERROR)
 
 project(graynet)
 
-find_package(CUDA)
+option(GRAYNET_USE_CUDA "Use CUDA" ON)
+option(GRAYNET_BUILD_EXAMPLES "Build examples" ON)
+option(GRAYNET_BUILD_TESTS "Build tests" ON)
+
+if(${GRAYNET_USE_CUDA})
+	find_package(CUDA REQUIRED)
+endif()
 
 # Set -DBLAS_LIBRARIES=`OpenBLAS dir`
 find_package(BLAS REQUIRED)
@@ -21,16 +27,13 @@ else()
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++11")
 endif()
 
-option(BUILD_EXAMPLES "Build examples" ON)
-option(BUILD_TESTS "Build tests" ON)
-
 add_subdirectory(graynet)
 add_subdirectory(3rdparty)
 
-if(${BUILD_EXAMPLES})
+if(${GRAYNET_BUILD_EXAMPLES})
 	add_subdirectory(examples)
 endif()
 
-if(${BUILD_TESTS})
+if(${GRAYNET_BUILD_TESTS})
 	add_subdirectory(test)
 endif()

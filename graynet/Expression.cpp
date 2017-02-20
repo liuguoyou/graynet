@@ -880,6 +880,7 @@ public:
 		if (graph->GetDeviceType() == CPU)
 			REPORT_ERROR("Convolution is only implemented in GPU.");
 
+#ifdef USE_CUDA
 		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
 		x_dims[0] = x[0]->GetBatchSize();
 		y_dims[0] = y->GetBatchSize();
@@ -913,6 +914,7 @@ public:
 		CUDNN_CALL(cudnnConvolutionForward(graph->GetDevice()->GetCuDNNHandle(),
 			&alpha, x_desc_, x_data, filter_desc_, filter_data, conv_desc_,
 			fwd_algo, nullptr, 0, &beta, y_desc_, y_data));
+#endif
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
@@ -926,6 +928,7 @@ public:
 		if (graph->GetDeviceType() == CPU)
 			REPORT_ERROR("Convolution is only implemented in GPU.");
 
+#ifdef USE_CUDA
 		float alpha = 1.f, beta = 1.f;
 
 		cudnnConvolutionBwdFilterAlgo_t bwd_filter_algo;
@@ -949,6 +952,7 @@ public:
 		CUDNN_CALL(cudnnConvolutionBackwardData(graph->GetDevice()->GetCuDNNHandle(),
 			&alpha, filter_desc_, filter_data, y_desc_, dEdY_data, conv_desc_, bwd_data_algo, nullptr, 0,
 			&beta, x_desc_, dEdX_data));
+#endif
 	}
 
 private:
@@ -978,15 +982,19 @@ public:
 
 	PoolingNode(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding, PoolingMode mode):
 		Node{ node }, filter_shape_(filter_shape), strides_(strides), padding_(padding), mode_(mode) {
+#ifdef USE_CUDA
 		CUDNN_CALL(cudnnCreatePoolingDescriptor(&pooling_desc_));
 		CUDNN_CALL(cudnnCreateTensorDescriptor(&x_desc_));
 		CUDNN_CALL(cudnnCreateTensorDescriptor(&y_desc_));
+#endif
 	}
 
 	virtual ~PoolingNode() {
+#ifdef USE_CUDA
 		CUDNN_CALL(cudnnDestroyPoolingDescriptor(pooling_desc_));
 		CUDNN_CALL(cudnnDestroyTensorDescriptor(x_desc_));
 		CUDNN_CALL(cudnnDestroyTensorDescriptor(y_desc_));
+#endif
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -999,6 +1007,7 @@ public:
 		if (graph->GetDeviceType() == CPU)
 			REPORT_ERROR("Pooling is only implemented in GPU.");
 
+#ifdef USE_CUDA
 		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
 		x_dims[0] = x[0]->GetBatchSize();
 		y_dims[0] = y->GetBatchSize();
@@ -1029,6 +1038,7 @@ public:
 		float alpha = 1.f, beta = 0.f;
 		CUDNN_CALL(cudnnPoolingForward(graph->GetDevice()->GetCuDNNHandle(), pooling_desc_,
 			&alpha, x_desc_, x_data, &beta, y_desc_, y_data));
+#endif
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
@@ -1041,10 +1051,12 @@ public:
 		if (graph->GetDeviceType() == CPU)
 			REPORT_ERROR("Pooling is only implemented in GPU.");
 		
+#ifdef USE_CUDA
 		float alpha = 1.f, beta = 1.f;
 		CUDNN_CALL(cudnnPoolingBackward(graph->GetDevice()->GetCuDNNHandle(), pooling_desc_,
 			&alpha, y_desc_, y_data, y_desc_, dEdY_data, x_desc_, x_data, &beta,
 			x_desc_, dEdX_data));
+#endif
 	}
 
 private:
@@ -1088,8 +1100,8 @@ public:
 			cublasSaxpy_v2(graph->GetDevice()->GetCuBLASHandle(), size,
 				&alpha, dEdY_data, 1, dEdX_data, 1);
 		}
-#endif
 		else
+#endif
 			cblas_saxpy(size, alpha, dEdY_data, 1, dEdX_data, 1);
 	}
 
