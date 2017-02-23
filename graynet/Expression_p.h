@@ -1,16 +1,38 @@
 #pragma once
 
 #include "Node.h"
+#include "Utils.h"
 
 #include <cmath>
 #ifdef USE_CUDA
-#include <host_defines.h>
+#include <cuda_runtime.h>
 #else
 #define __device__
 #define __host__
 #endif
 
 /*! \cond NOSHOW */
+
+static void *PinMemory(Device *device, const void *data, int size) {
+	void *ret;
+#ifdef USE_CUDA
+	if (device->GetDeviceType() == GPU)
+		ret = (float*)device->AllocateMemory(size, Device::PinnedScratchMemoryPool);
+	else
+#endif
+		ret = (float*)device->AllocateMemory(size, Device::ScratchMemoryPool);
+	memcpy(ret, data, size);
+	return ret;
+}
+
+static void CopyMemoryHostToDeviceAsync(Device *device, void *dst, const void *src, int size) {
+#ifdef USE_CUDA
+	if (device->GetDeviceType() == GPU)
+		CUDA_CALL(cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice));
+	else
+#endif
+		memcpy(dst, src, size);
+}
 
 static void AllocateClearTensor(Graph *graph, Tensor *tensor) {
 	if (tensor->GetData() == nullptr) {
@@ -45,6 +67,11 @@ static void GetTensorDims(const Tensor *tensor, int dims[kMaxTensorDim + 1]) {
 	for (int i = 0; i < shape.GetDimCount(); i++)
 		dims[i + 1] = shape.GetDim(i);
 }
+
+template<typename Dummy, DeviceType DeviceType>
+struct LookupNodeFactory {
+	Node *Create(Graph *graph, int embeddings, int batch_size, const Shape &shape, const int *indices);
+};
 
 template<DeviceType DeviceType, typename ForwardFunc, typename BackwardFunc>
 struct BinaryOpNodeFactory {

@@ -344,7 +344,7 @@ void Graph::Backward(const Expression &expression) {
 		for (int arg_id : d->nodes_[i]->GetArguments())
 			if (arg_id >= 0) {
 				if (degrees[arg_id] == 0) {
-					// FIXME: This is only correct for SparseDotNot
+					// FIXME: This is only correct for SparseDotNode
 					// For other nodes, we should at least zero the gradient tensor
 					// We should probably move ZeroMemory() to tensor and support sparse tensors with ti.
 					if (!(d->nodes_[i]->GetFlags() & Node::NoAllocateBackwardOutput)) {

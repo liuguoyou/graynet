@@ -23,22 +23,6 @@ static inline __device__ int GetTensorStorageIndex(int logical_index, int ndims,
 	return ret;
 }
 
-struct BinaryForwardDims {
-	int elems[kMaxTensorDim + 1];
-	int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
-};
-
-template<typename ForwardFunc>
-static __global__ void BinaryForwardKernel(const float *lhs, const float *rhs, float *y,
-	int nelems, int ndims, BinaryForwardDims forward) {
-	int i = blockDim.x * blockIdx.x + threadIdx.x;
-	if (i < nelems) {
-		int lhs_index = GetTensorStorageIndex(i, ndims, forward.elems, forward.lhs_strides);
-		int rhs_index = GetTensorStorageIndex(i, ndims, forward.elems, forward.rhs_strides);
-		y[i] = ForwardFunc()(lhs[lhs_index], rhs[rhs_index]);
-	}
-}
-
 struct ReduceDesc {
 	int regular_sizes[kMaxTensorDim + 1], reduce_sizes[kMaxTensorDim + 1];
 	int strides[kMaxTensorDim + 1];
@@ -155,6 +139,77 @@ static void TransformReduce(TransformFunc transform_func, ReduceFunc reduce_func
 
 		TransformReduceKernel<<<blocksPerGrid, threadsPerBlock>>>(transform_func, reduce_func, store_func,
 			dims, regular_total, reduce_total, desc, reduces_per_thread, extra_data);
+	}
+}
+
+static __global__ void LookupForwardKernel(int total, int emb_size, const int *indices,
+	const float *x, float *y) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < total) {
+		int j = i / emb_size;
+		int k = i % emb_size;
+		y[i] = x[indices[j] * emb_size + k];
+	}
+}
+
+class LookupNodeGPU : public Node {
+public:
+	LookupNodeGPU(Graph *graph, int embeddings, int batch_size, const Shape &shape, const int *indices)
+		: Node{ embeddings }, batch_size_(batch_size), shape_(shape) {
+		int size = batch_size * shape.GetSize();
+		indices_ = (const int*)PinMemory(graph->GetDevice(), indices, size * sizeof(int));
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const float *x_data = x[0]->GetData();
+		float *y_data = y->GetData();
+		int total = y->GetBatchSize() * y->GetShape().GetSize();
+		int emb_size = y->GetShape().GetDim(1);
+
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (total + threadsPerBlock - 1) / threadsPerBlock;
+		LookupForwardKernel<<<blocksPerGrid, threadsPerBlock>>>(total, emb_size, indices_,
+			x_data, y_data);
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+		int total = y->GetBatchSize() * y->GetShape().GetSize();
+		int emb_size = y->GetShape().GetDim(1);
+
+		REPORT_ERROR("GPU Backward kernel for Lookup() not implemented.");
+	}
+
+private:
+	int batch_size_;
+	Shape shape_;
+	const int *indices_;
+};
+
+template<typename Dummy>
+struct LookupNodeFactory<Dummy, GPU> {
+	Node *Create(Graph *graph, int embeddings, int batch_size, const Shape &shape, const int *indices) {
+		return new LookupNodeGPU(graph, embeddings, batch_size, shape, indices);
+	}
+};
+
+template struct LookupNodeFactory<void, GPU>;
+
+struct BinaryForwardDims {
+	int elems[kMaxTensorDim + 1];
+	int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
+};
+
+template<typename ForwardFunc>
+static __global__ void BinaryForwardKernel(const float *lhs, const float *rhs, float *y,
+	int nelems, int ndims, BinaryForwardDims forward) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < nelems) {
+		int lhs_index = GetTensorStorageIndex(i, ndims, forward.elems, forward.lhs_strides);
+		int rhs_index = GetTensorStorageIndex(i, ndims, forward.elems, forward.rhs_strides);
+		y[i] = ForwardFunc()(lhs[lhs_index], rhs[rhs_index]);
 	}
 }
 

@@ -36,7 +36,7 @@ Expression ConvolutionLayer::operator()(const char *name, const Expression &x,
 			b_shape.PushDim(1);
 		graph->DefineParameter(&b, "b", b_shape);
 	}
-	result = Convolution(x, w, strides, padding);// +b; FIXME: TOO SLOW DISABLE FOR NOW
+	result = Convolution(x, w, strides, padding) + b;
 	graph->PopScope();
 	return result;
 }

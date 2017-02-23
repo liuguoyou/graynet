@@ -44,6 +44,18 @@ void Expression::Backward() const {
 }
 
 template<template<typename, DeviceType> typename FactoryType, typename... TArg>
+static Expression CreateDeviceSpecificInputNode(Graph *graph, int batch_size, const Shape &output_shape, TArg&&... arg) {
+	Node *node;
+#ifdef USE_CUDA
+	if (graph->GetDeviceType() == GPU)
+		node = FactoryType<void, GPU>().Create(std::forward<TArg>(arg)...);
+	else
+#endif
+		node = FactoryType<void, CPU>().Create(std::forward<TArg>(arg)...);
+	return graph->AddNode(node, output_shape, false, batch_size);
+}
+
+template<template<typename, DeviceType> typename FactoryType, typename... TArg>
 static Expression CreateDeviceSpecificNode(Graph *graph, const Shape &output_shape, TArg&&... arg) {
 	Node *node;
 #ifdef USE_CUDA
@@ -53,27 +65,6 @@ static Expression CreateDeviceSpecificNode(Graph *graph, const Shape &output_sha
 #endif
 		node = FactoryType<void, CPU>().Create(std::forward<TArg>(arg)...);
 	return graph->AddNode(node, output_shape);
-}
-
-static void *PinMemory(Device *device, const void *data, int size) {
-	void *ret;
-#ifdef USE_CUDA
-	if (device->GetDeviceType() == GPU)
-		ret = (float*)device->AllocateMemory(size, Device::PinnedScratchMemoryPool);
-	else
-#endif
-		ret = (float*)device->AllocateMemory(size, Device::ScratchMemoryPool);
-	memcpy(ret, data, size);
-	return ret;
-}
-
-static void CopyMemoryHostToDeviceAsync(Device *device, void *dst, const void *src, int size) {
-#ifdef USE_CUDA
-	if (device->GetDeviceType() == GPU)
-		CUDA_CALL(cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice));
-	else
-#endif
-		memcpy(dst, src, size);
 }
 
 class InputNode : public Node {
@@ -154,6 +145,69 @@ Expression BatchSparseVectorInput(Graph *graph, int batch_size, const Shape &sha
 	int nonzero_count, const float *sparse_data, const int *batch_indices, const int *indices) {
 	return graph->AddNode(new SparseInputNode(graph, batch_size, shape, nonzero_count,
 		sparse_data, batch_indices, indices), shape, true, batch_size);
+}
+
+class LookupNodeCPU : public Node {
+public:
+	LookupNodeCPU(Graph *graph, int embeddings, int batch_size, const Shape &shape, const int *indices)
+		: Node{ embeddings }, batch_size_(batch_size), shape_(shape) {
+		int size = batch_size * shape.GetSize();
+		indices_ = (const int*)PinMemory(graph->GetDevice(), indices, size * sizeof(int));
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const float *emb_data = x[0]->GetData();
+		int count = batch_size_ * shape_.GetSize();
+		int emb_size = x[0]->GetShape().GetDim(1);
+		float *y_data = y->GetData();
+		for (int i = 0; i < count; i++) {
+			int index = indices_[i];
+			memcpy(y_data, &emb_data[emb_size * index], emb_size * sizeof(float));
+			y_data += emb_size;
+		}
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+		int count = batch_size_ * shape_.GetSize();
+		int emb_size = x[0]->GetShape().GetDim(1);
+		for (int i = 0; i < count; i++) {
+			int index = indices_[i];
+			cblas_saxpy(emb_size, 1.f, &dEdY_data[emb_size * i], 1,
+				&dEdX_data[emb_size * index], 1);
+		}
+	}
+
+private:
+	int batch_size_;
+	Shape shape_;
+	const int *indices_;
+};
+
+template<typename Dummy>
+struct LookupNodeFactory<Dummy, CPU> {
+	Node *Create(Graph *graph, int embeddings, int batch_size, const Shape &shape, const int *indices) {
+		return new LookupNodeCPU(graph, embeddings, batch_size, shape, indices);
+	}
+};
+
+Expression Lookup(const Expression &embeddings, const Shape &shape, const int *indices) {
+	return BatchLookup(embeddings, 1, shape, indices);
+}
+
+Expression BatchLookup(const Expression &embeddings, int batch_size, const Shape &shape, const int *indices) {
+	Graph *graph = embeddings.GetGraph();
+	if (embeddings.GetBatchSize() != 1)
+		REPORT_ERROR("Embedding table must be of batch size 1.");
+	if (embeddings.GetShape().GetDimCount() != 2)
+		REPORT_ERROR("Embedding table must be of rank 2.");
+	int emb_size = embeddings.GetShape().GetDim(1);
+	Shape output_shape = shape;
+	output_shape.PushDim(emb_size);
+	return CreateDeviceSpecificInputNode<LookupNodeFactory>(graph, batch_size, output_shape,
+		graph, embeddings.GetNodeIndex(), batch_size, shape, indices);
 }
 
 namespace {

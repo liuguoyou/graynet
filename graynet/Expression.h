@@ -53,15 +53,81 @@ private:
 /*! \defgroup Input_Operations */
 /*! @{ */
 
-/*! Data input */
+/*! Feeds a single dense tensor to the graph.
+ * \param graph The graph to hold the expression.
+ * \param shape The shape of the data tensor.
+ * \param data The raw dense data. The size of the array must match the size of given shape.
+ */
 Expression Input(Graph *graph, const Shape &shape, const float *data);
 
-/*! Batch data input */
+/*! Batched version of \ref Input. Feeds a batch of dense tensors to the graph.
+ * \param graph The graph to hold the expression.
+ * \param batch_size The size of the input batch.
+ * \param shape The shape of the data tensor.
+ * \param data The raw data array. The batch instances should be laid sequentially in memory.
+ */
 Expression BatchInput(Graph *graph, int batch_size, const Shape &shape, const float *data);
 
-/*! Batched sparse vector input (CSR format) */
+/*! Feeds a batched sparse vector input to the graph.
+ *
+ * The input data should be given as a CSR formatted sparse matrix where each row
+ * is an input vector.
+ *
+ * The CSR matrix is represented as three arrays: an array holding all nonzero values,
+ * an array holding the start and end position of each row, and an array holding the
+ * column index of each nonzero value.
+ *
+ * For example, consider the following matrix:
+ *
+ * \code
+ * [ .1 .2  0  0  0  0 ]
+ * [  0 .3  0 .4  0  0 ]
+ * [  0  0 .5 .6 .7  0 ]
+ * [  0  0  0  0  0 .8 ]
+ * \endcode
+ *
+ * In CSR format, the three arrays will be:
+ *
+ * \code
+ * values =         [ .1 .2 .3 .4 .5 .6 .7 .8 ]
+ * row indices =    [  0     2     4        7  8 ]
+ * column indices = [  0  1  1  3  2  3  4  5 ]
+ * \endcode
+ *
+ * \param graph The graph to hold the expression.
+ * \param batch_size The size of the input batch.
+ * \param shape The shape of the data vector. Must be of rank 1.
+ * \param nonzero_count The total number of nonzero values in the input.
+ * \param sparse_data Float array holding nonzero values. The length of this array
+ * must be equal to `batch_size + 1`.
+ * \param batch_indices Start and end position of each batch. The length of this array
+ * must be equal to `nonzero_count`.
+ * \param indices Data vector index of each nonzero value. The length of this array
+ * must be equal to `nonzero_count`.
+ */
 Expression BatchSparseVectorInput(Graph *graph, int batch_size, const Shape &shape,
 	int nonzero_count, const float *sparse_data, const int *batch_indices, const int *indices);
+
+/*! Lookup embeddings from an embedding table.
+ * The embeddings must be given as a matrix where each row is an embedding vector.
+ * It must have shape `(emb_count, emb_size)`.
+ * The input specifies the row number (starting from 0) of the matrix where the embeddings
+ * will be picked. Suppose the input shape of the indices is `(a, b, ..., c)`, the output 
+ * shape will be `(a, b, ..., c, emb_size)`.
+ * \param embeddings The embedding table. Must be of batch size 1 and rank 2.
+ * \param shape The shape of the lookup indices.
+ * \param indices The data array holding the lookup indices.
+ */
+Expression Lookup(const Expression &embeddings, const Shape &shape, const int *indices);
+
+/*! Batched version of \ref lookup.
+ * \param embeddings The embedding table. Must be of batch size 1 and rank 2.
+ * \param batch_size The batch size of the lookup indices.
+ * \param shape The shape of the lookup indices.
+ * \param indices The data array holding the lookup indices.
+ */
+Expression BatchLookup(const Expression &embeddings, int batch_size, const Shape &shape,
+	const int *indices);
 
 /*! @} */
 
