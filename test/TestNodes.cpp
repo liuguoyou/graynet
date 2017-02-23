@@ -78,6 +78,31 @@ TEST_F(NodeTest, BatchInput) {
 	CheckValue(x, data);
 }
 
+TEST_F(NodeTest, Lookup) {
+	const float embeddings_data[] = {
+		0.1f, 0.2f, 0.3f, 0.4f, 0.5f,
+		-0.1f, -0.2f, -0.3f, -0.4f, -0.5f,
+		0.3f, 0.2f, 0.7f, 1.3f, 0.9f,
+		-0.4f, 0.6f, 0.8f, -2.3f, -1.7f,
+	};
+	const int indices_data[] = {
+		3, 0, 0, 1, 2, 1,
+	};
+	Expression embeddings = graph.AddParameter(Shape(4, 5), embeddings_data);
+	Expression x = Lookup(embeddings, Shape(6), indices_data);
+	const float expected[] = {
+		-0.4f, 0.6f, 0.8f, -2.3f, -1.7f,
+		0.1f, 0.2f, 0.3f, 0.4f, 0.5f,
+		0.1f, 0.2f, 0.3f, 0.4f, 0.5f,
+		-0.1f, -0.2f, -0.3f, -0.4f, -0.5f,
+		0.3f, 0.2f, 0.7f, 1.3f, 0.9f,
+		-0.1f, -0.2f, -0.3f, -0.4f, -0.5f,
+	};
+	CheckValue(x, expected);
+	x = ReduceSum(x);
+	CheckGradient(x);
+}
+
 TEST_F(NodeTest, SoftMargin) {
 	const float x_data[] = { 0.1f, 0.5f, 0.3f, 0.7f, 0.2f, 0.9f };
 	const float label_data[] = { -1.f, -1.f, -1.f, 1.f, 1.f, 1.f };
@@ -416,9 +441,9 @@ TEST_F(NodeTest, BatchMaxPooling2D) {
 		0.5f, 0.9f, 0.9f,
 		0.5f, 0.9f, 0.9f,
 
-		0.0f, 0.5f, 0.5f,
+		-0.1f, 0.5f, 0.5f,
 		0.3f, 0.5f, 0.5f,
-		0.3f, 0.3f, 0.0f,
+		0.3f, 0.3f, -0.2f,
 	};
 	CheckValue(x, expected);
 }

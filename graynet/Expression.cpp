@@ -1124,7 +1124,7 @@ namespace {
 		float *y;
 
 		FORCEINLINE void operator()(const std::array<int, N * 2 + 1> &input) {
-			float cur = 0;
+			float cur = -std::numeric_limits<float>::infinity();
 			auto enumerate_func = [&](int index) {
 				if (x[index] > cur)
 					cur = x[index];
