@@ -51,5 +51,6 @@ void ReportError(const char *msg, ...) {
 	va_start(ap, msg);
 	vsprintf(buf, msg, ap);
 	fputs(buf, stderr);
+	fputs("\n", stderr);
 	throw std::runtime_error(buf);
 }
