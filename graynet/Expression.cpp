@@ -159,7 +159,7 @@ Expression BatchSparseVectorInput(Graph *graph, int batch_size, const Shape &sha
 namespace {
 	template<int N, int I, int M, typename TransformFunc>
 	struct TransformKernel {
-		void Transform(TransformFunc transform_func, const int *dims,
+		void Transform(TransformFunc &transform_func, const int *dims,
 			const std::array<const int *, M> &strides, const std::array<int, M> &bases) {
 			std::array<int, M> cur = bases;
 			for (int j = 0; j < dims[I]; j++) {
@@ -172,7 +172,7 @@ namespace {
 
 	template<int N, int M, typename TransformFunc>
 	struct TransformKernel<N, N, M, TransformFunc> {
-		void Transform(TransformFunc transform_func, const int *dims,
+		void Transform(TransformFunc &transform_func, const int *dims,
 			const std::array<const int *, M> &strides, const std::array<int, M> &bases) {
 			apply(transform_func, bases);
 		}
@@ -972,29 +972,176 @@ Expression Convolution(const Expression &x, const Expression &filter, const Shap
 	return graph->AddNode(new ConvolutionNode(x.GetNodeIndex(), filter.GetNodeIndex(), strides, padding), output_shape);
 }
 
-class PoolingNode : public Node {
-public:
-	enum PoolingMode {
-		MaxPooling,
-		AvgPooling,
-		AvgPoolingWithPadding,
+namespace {
+	template<int N, int I, typename EnumerateFunc>
+	struct EnumerateTileKernel {
+		FORCEINLINE void EnumerateTile(EnumerateFunc &enumerate_func, const std::array<int, N * 2 + 1> &input,
+			const int *strides, int index) {
+			int dim_start = input[I * 2 + 1];
+			int dim_end = input[I * 2 + 2];
+			for (int j = dim_start; j < dim_end; j++)
+				EnumerateTileKernel<N, I + 1, EnumerateFunc>().EnumerateTile(
+					enumerate_func, input, strides, index + strides[I + 1] * j);
+		}
 	};
 
-	PoolingNode(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding, PoolingMode mode):
-		Node{ node }, filter_shape_(filter_shape), strides_(strides), padding_(padding), mode_(mode) {
-#ifdef USE_CUDA
-		CUDNN_CALL(cudnnCreatePoolingDescriptor(&pooling_desc_));
-		CUDNN_CALL(cudnnCreateTensorDescriptor(&x_desc_));
-		CUDNN_CALL(cudnnCreateTensorDescriptor(&y_desc_));
-#endif
+	template<int N, typename EnumerateFunc>
+	struct EnumerateTileKernel<N, N, EnumerateFunc> {
+		FORCEINLINE void EnumerateTile(EnumerateFunc &enumerate_func, const std::array<int, N * 2 + 1> &input,
+			const int *strides, int index) {
+			enumerate_func(index);
+		}
+	};
+
+	template<int N, typename EnumerateFunc>
+	static FORCEINLINE void EnumerateTile(EnumerateFunc &enumerate_func, const std::array<int, N * 2 + 1> &input,
+		const int *strides) {
+		int index = strides[0] * input[0];
+		EnumerateTileKernel<N, 0, EnumerateFunc>().EnumerateTile(enumerate_func, input, strides, index);
 	}
 
-	virtual ~PoolingNode() {
-#ifdef USE_CUDA
-		CUDNN_CALL(cudnnDestroyPoolingDescriptor(pooling_desc_));
-		CUDNN_CALL(cudnnDestroyTensorDescriptor(x_desc_));
-		CUDNN_CALL(cudnnDestroyTensorDescriptor(y_desc_));
-#endif
+	template<int N, int I, typename TransformFunc>
+	struct ForEachTileKernel {
+		FORCEINLINE void ForEachTile(TransformFunc &transform_func, const Shape &x_shape,
+			const Shape &filter_shape, const Shape &strides, const Shape &padding, std::array<int, N * 2 + 1> &input) {
+			int dim_start = -padding.GetDim(I);
+			int dim_end = x_shape.GetDim(I + 1) + padding.GetDim(I) - filter_shape.GetDim(I) + 1;
+			for (int j = dim_start; j < dim_end; j++) {
+				input[I * 2 + 1] = j;
+				input[I * 2 + 2] = j + filter_shape.GetDim(I);
+				if (input[I * 2 + 1] < 0)
+					input[I * 2 + 1] = 0;
+				if (input[I * 2 + 2] > x_shape.GetDim(I + 1))
+					input[I * 2 + 2] = x_shape.GetDim(I + 1);
+				ForEachTileKernel<N, I + 1, TransformFunc>().ForEachTile(
+					transform_func, x_shape, filter_shape, strides, padding, input);
+			}
+		}
+	};
+
+	template<int N, typename TransformFunc>
+	struct ForEachTileKernel<N, N, TransformFunc> {
+		FORCEINLINE void ForEachTile(TransformFunc &transform_func, const Shape &x_shape,
+			const Shape &filter_shape, const Shape &strides, const Shape &padding, std::array<int, N * 2 + 1> &input) {
+			transform_func(input);
+		}
+	};
+
+	template<int N, typename TransformFunc>
+	static void ForEachTile(TransformFunc transform_func, int batch_size, const Shape &x_shape,
+		const Shape &filter_shape, const Shape &strides, const Shape &padding) {
+		std::array<int, N * 2 + 1> input;
+		for (int i = 0; i < batch_size; i++) {
+			input[0] = i;
+			ForEachTileKernel<N, 0, TransformFunc>().ForEachTile(
+				transform_func, x_shape,
+				filter_shape, strides, padding, input);
+		}
+	}
+
+	template<template<int> typename TransformFunc, typename... T>
+	void ForEachTile(int ndims, int batch_size, const Shape &x_shape, const Shape &filter_shape,
+		const Shape &strides, const Shape &padding, T&&... transform_func_arg) {
+		switch (ndims) {
+		case 1: ForEachTile<1>(TransformFunc<1>{std::forward<T>(transform_func_arg)...},
+			batch_size, x_shape, filter_shape, strides, padding); break;
+		case 2: ForEachTile<2>(TransformFunc<2>{std::forward<T>(transform_func_arg)...},
+			batch_size, x_shape, filter_shape, strides, padding); break;
+		case 3: ForEachTile<3>(TransformFunc<3>{std::forward<T>(transform_func_arg)...},
+			batch_size, x_shape, filter_shape, strides, padding); break;
+		case 4: ForEachTile<4>(TransformFunc<4>{std::forward<T>(transform_func_arg)...},
+			batch_size, x_shape, filter_shape, strides, padding); break;
+		case 5: ForEachTile<5>(TransformFunc<5>{std::forward<T>(transform_func_arg)...},
+			batch_size, x_shape, filter_shape, strides, padding); break;
+		case 6: ForEachTile<6>(TransformFunc<6>{std::forward<T>(transform_func_arg)...},
+			batch_size, x_shape, filter_shape, strides, padding); break;
+		case 7: ForEachTile<7>(TransformFunc<7>{std::forward<T>(transform_func_arg)...},
+			batch_size, x_shape, filter_shape, strides, padding); break;
+		default:
+			static_assert(7 == kMaxTensorDim, "");
+			REPORT_ERROR("Unsupported dimension count: %d", ndims);
+		}
+	}
+
+	template<int N>
+	struct MaxPoolingForwardKernel {
+		const int *x_strides;
+		const float *x;
+		float *y;
+
+		FORCEINLINE void operator()(const std::array<int, N * 2 + 1> &input) {
+			float cur = 0;
+			auto enumerate_func = [&](int index) {
+				if (x[index] > cur)
+					cur = x[index];
+			};
+			EnumerateTile<N>(enumerate_func, input, x_strides);
+			*y++ = cur;
+		}
+	};
+
+	template<int N>
+	struct MaxPoolingBackwardKernel {
+		const int *x_strides;
+		const float *x, *y;
+		const float *dEdY;
+		float *dEdX;
+
+		FORCEINLINE void operator()(const std::array<int, N * 2 + 1> &input) {
+			auto enumerate_func = [&](int index) {
+				if (x[index] == *y)
+					dEdX[index] += *dEdY;
+			};
+			EnumerateTile<N>(enumerate_func, input, x_strides);
+			dEdY++;
+			y++;
+		}
+	};
+
+	template<int N>
+	struct AvgPoolingForwardKernel {
+		const int *x_strides;
+		const float *x;
+		float *y;
+
+		FORCEINLINE void operator()(const std::array<int, N * 2 + 1> &input) {
+			float cur = 0;
+			int cnt = 0;
+			auto enumerate_func = [&](int index) {
+				cur += x[index];
+				cnt++;
+			};
+			EnumerateTile<N>(enumerate_func, input, x_strides);
+			*y++ = (cnt == 0) ? 0.f : cur / cnt;
+		}
+	};
+
+	template<int N>
+	struct AvgPoolingBackwardKernel {
+		const int *x_strides;
+		const float *dEdY;
+		float *dEdX;
+
+		FORCEINLINE void operator()(const std::array<int, N * 2 + 1> &input) {
+			int cnt = 0;
+			auto enumerate_func1 = [&](int index) {
+				cnt++;
+			};
+			EnumerateTile<N>(enumerate_func1, input, x_strides);
+			float m = 1.f / cnt;
+			auto enumerate_func2 = [&](int index) {
+				dEdX[index] += *dEdY * m;
+			};
+			EnumerateTile<N>(enumerate_func2, input, x_strides);
+			dEdY++;
+		}
+	};
+}
+
+class PoolingNodeCPU : public Node {
+public:
+	PoolingNodeCPU(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding, PoolingMode mode)
+		: Node{ node }, filter_shape_(filter_shape), strides_(strides), padding_(padding), mode_(mode) {
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -1002,82 +1149,94 @@ public:
 		const Shape &y_shape = y->GetShape();
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
-		int ndims = y->GetShape().GetDimCount() - 1;
+		int batch_size = y->GetBatchSize() * y_shape.GetDim(0);
+		int ndims = y_shape.GetDimCount() - 1;
+		int x_strides[kMaxTensorDim + 1];
+		GetTensorStrides(x[0], x_strides);
+		if (x_strides[1] == 0)
+			x_strides[1] = x_strides[0];
 
-		if (graph->GetDeviceType() == CPU)
-			REPORT_ERROR("Pooling is only implemented in GPU.");
+		switch (mode_) {
+		case PoolingMode::MaxPooling:
+			ForEachTile<MaxPoolingForwardKernel>(ndims, batch_size, x_shape, filter_shape_, strides_, padding_,
+				&x_strides[1], x_data, y_data);
+			break;
 
-#ifdef USE_CUDA
-		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
-		x_dims[0] = x[0]->GetBatchSize();
-		y_dims[0] = y->GetBatchSize();
-		for (int i = 0; i < ndims + 1; i++) {
-			x_dims[i + 1] = x_shape.GetDim(i);
-			y_dims[i + 1] = y_shape.GetDim(i);
-		}
-		int x_strides[CUDNN_DIM_MAX], y_strides[CUDNN_DIM_MAX];
-		x_strides[ndims + 1] = 1;
-		y_strides[ndims + 1] = 1;
-		for (int i = ndims; i >= 0; i--) {
-			x_strides[i] = x_dims[i + 1] * x_strides[i + 1];
-			y_strides[i] = y_dims[i + 1] * y_strides[i + 1];
-		}
-		cudnnPoolingMode_t pooling_mode;
-		if (mode_ == MaxPooling)
-			pooling_mode = CUDNN_POOLING_MAX;
-		else if (mode_ == AvgPooling)
-			pooling_mode = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
-		else if (mode_ == AvgPoolingWithPadding)
-			pooling_mode = CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING;
-		else
+		case PoolingMode::AvgPooling:
+			ForEachTile<AvgPoolingForwardKernel>(ndims, batch_size, x_shape, filter_shape_, strides_, padding_,
+				&x_strides[1], x_data, y_data);
+			break;
+
+		case PoolingMode::AvgPoolingWithPadding:
+			//ForEachTile<AvgPoolingWithPaddingForwardKernel>(ndims, batch_size, x_shape, filter_shape_, strides_, padding_,
+			//	&x_strides[1], x_data, y_data);
+			REPORT_ERROR("AvgPoolingWithPadding not implemented.");
+			break;
+
+		default:
 			DEBUG_BREAK();
-		CUDNN_CALL(cudnnSetPoolingNdDescriptor(pooling_desc_, pooling_mode, CUDNN_PROPAGATE_NAN,
-			ndims, filter_shape_.data(), padding_.data(), strides_.data()));
-		CUDNN_CALL(cudnnSetTensorNdDescriptor(x_desc_, CUDNN_DATA_FLOAT, ndims + 2, x_dims, x_strides));
-		CUDNN_CALL(cudnnSetTensorNdDescriptor(y_desc_, CUDNN_DATA_FLOAT, ndims + 2, y_dims, y_strides));
-		float alpha = 1.f, beta = 0.f;
-		CUDNN_CALL(cudnnPoolingForward(graph->GetDevice()->GetCuDNNHandle(), pooling_desc_,
-			&alpha, x_desc_, x_data, &beta, y_desc_, y_data));
-#endif
+		}
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const Shape &x_shape = x[0]->GetShape();
+		const Shape &y_shape = y->GetShape();
 		const float *x_data = x[0]->GetData();
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();
 		float *dEdX_data = dEdX[0]->GetData();
+		int batch_size = y->GetBatchSize() * y_shape.GetDim(0);
+		int ndims = y->GetShape().GetDimCount() - 1;
+		int x_strides[kMaxTensorDim + 1];
+		GetTensorStrides(x[0], x_strides);
+		if (x_strides[1] == 0)
+			x_strides[1] = x_strides[0];
 
-		if (graph->GetDeviceType() == CPU)
-			REPORT_ERROR("Pooling is only implemented in GPU.");
-		
-#ifdef USE_CUDA
-		float alpha = 1.f, beta = 1.f;
-		CUDNN_CALL(cudnnPoolingBackward(graph->GetDevice()->GetCuDNNHandle(), pooling_desc_,
-			&alpha, y_desc_, y_data, y_desc_, dEdY_data, x_desc_, x_data, &beta,
-			x_desc_, dEdX_data));
-#endif
+		switch (mode_) {
+		case PoolingMode::MaxPooling:
+			ForEachTile<MaxPoolingBackwardKernel>(ndims, batch_size, x_shape, filter_shape_, strides_, padding_,
+				&x_strides[1], x_data, y_data, dEdY_data, dEdX_data);
+			break;
+
+		case PoolingMode::AvgPooling:
+			ForEachTile<AvgPoolingBackwardKernel>(ndims, batch_size, x_shape, filter_shape_, strides_, padding_,
+				&x_strides[1], dEdY_data, dEdX_data);
+			break;
+
+		case PoolingMode::AvgPoolingWithPadding:
+			//ForEachTile<AvgPoolingWithPaddingBackwardKernel>(ndims, batch_size, x_shape, filter_shape_, strides_, padding_,
+			//	&x_strides[1], dEdY_data, dEdX_data);
+			REPORT_ERROR("AvgPoolingWithPadding not implemented.");
+			break;
+
+		default:
+			DEBUG_BREAK();
+		}
 	}
 
 private:
 	Shape filter_shape_, strides_, padding_;
 	PoolingMode mode_;
-#ifdef USE_CUDA
-	cudnnPoolingDescriptor_t pooling_desc_;
-	cudnnTensorDescriptor_t x_desc_, y_desc_;
-#endif
+};
+
+template<typename Dummy>
+struct PoolingNodeFactory<Dummy, CPU> {
+	Node *Create(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding, PoolingMode mode) {
+		return new PoolingNodeCPU(node, filter_shape, strides, padding, mode);
+	}
 };
 
 Expression MaxPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding) {
 	Shape output_shape = FilterForwardShape(x.GetShape(), filter_shape, strides, padding, true);
 	Graph *graph = x.GetGraph();
-	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding, PoolingNode::MaxPooling), output_shape);
+	return CreateDeviceSpecificNode<PoolingNodeFactory>(graph, output_shape, x.GetNodeIndex(), filter_shape, strides, padding, PoolingMode::MaxPooling);
 }
 
 Expression AvgPooling(const Expression &x, const Shape &filter_shape, const Shape &strides, const Shape &padding) {
 	Shape output_shape = FilterForwardShape(x.GetShape(), filter_shape, strides, padding, true);
 	Graph *graph = x.GetGraph();
-	return graph->AddNode(new PoolingNode(x.GetNodeIndex(), filter_shape, strides, padding, PoolingNode::AvgPooling), output_shape);
+	return CreateDeviceSpecificNode<PoolingNodeFactory>(graph, output_shape, x.GetNodeIndex(), filter_shape, strides, padding, PoolingMode::AvgPooling);
 }
 
 class ReshapeNode : public Node {

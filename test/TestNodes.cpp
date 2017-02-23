@@ -4,7 +4,7 @@
 
 class NodeTest: public testing::Test {
 public:
-	NodeTest() : device(), graph(&device) {
+	NodeTest() : device(CPU), graph(&device) {
 	}
 
 	void CheckGradient(const Expression &loss) {
@@ -397,6 +397,30 @@ TEST_F(NodeTest, AvgPooling1D) {
 	const int label = 1;
 	x = CrossEntropy(x, 1, &label);
 	CheckGradient(x);
+}
+
+TEST_F(NodeTest, BatchMaxPooling2D) {
+	const float x_data[] = {
+		0.1f, 0.3f, 0.5f,
+		0.2f, -0.6f, 0.7f,
+		0.1f, 0.5f, 0.9f,
+
+		-0.1f, -0.3f, 0.5f,
+		-0.4f, -0.2f, -0.7f,
+		0.3f, -0.9f, -0.5f,
+	};
+	Expression x = BatchInput(&graph, 2, Shape(1, 3, 3), x_data);
+	x = MaxPooling(x, Shape(3, 3), Shape(1, 1), Shape(1, 1));
+	const float expected[] = {
+		0.3f, 0.7f, 0.7f,
+		0.5f, 0.9f, 0.9f,
+		0.5f, 0.9f, 0.9f,
+
+		0.0f, 0.5f, 0.5f,
+		0.3f, 0.5f, 0.5f,
+		0.3f, 0.3f, 0.0f,
+	};
+	CheckValue(x, expected);
 }
 
 TEST_F(NodeTest, Dot) {

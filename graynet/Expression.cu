@@ -514,6 +514,89 @@ struct SparseDotNodeFactory<Dummy, GPU> {
 
 template struct SparseDotNodeFactory<void, GPU>;
 
+class PoolingNodeGPU : public Node {
+public:
+	PoolingNodeGPU(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding, PoolingMode mode)
+		: Node{ node }, filter_shape_(filter_shape), strides_(strides), padding_(padding), mode_(mode) {
+		CUDNN_CALL(cudnnCreatePoolingDescriptor(&pooling_desc_));
+		CUDNN_CALL(cudnnCreateTensorDescriptor(&x_desc_));
+		CUDNN_CALL(cudnnCreateTensorDescriptor(&y_desc_));
+	}
+
+	virtual ~PoolingNodeGPU() {
+		CUDNN_CALL(cudnnDestroyPoolingDescriptor(pooling_desc_));
+		CUDNN_CALL(cudnnDestroyTensorDescriptor(x_desc_));
+		CUDNN_CALL(cudnnDestroyTensorDescriptor(y_desc_));
+	}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const Shape &x_shape = x[0]->GetShape();
+		const Shape &y_shape = y->GetShape();
+		const float *x_data = x[0]->GetData();
+		float *y_data = y->GetData();
+		int ndims = y->GetShape().GetDimCount() - 1;
+
+		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
+		x_dims[0] = x[0]->GetBatchSize();
+		y_dims[0] = y->GetBatchSize();
+		for (int i = 0; i < ndims + 1; i++) {
+			x_dims[i + 1] = x_shape.GetDim(i);
+			y_dims[i + 1] = y_shape.GetDim(i);
+		}
+		int x_strides[CUDNN_DIM_MAX], y_strides[CUDNN_DIM_MAX];
+		x_strides[ndims + 1] = 1;
+		y_strides[ndims + 1] = 1;
+		for (int i = ndims; i >= 0; i--) {
+			x_strides[i] = x_dims[i + 1] * x_strides[i + 1];
+			y_strides[i] = y_dims[i + 1] * y_strides[i + 1];
+		}
+		cudnnPoolingMode_t pooling_mode;
+		if (mode_ == PoolingMode::MaxPooling)
+			pooling_mode = CUDNN_POOLING_MAX;
+		else if (mode_ == PoolingMode::AvgPooling)
+			pooling_mode = CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING;
+		else if (mode_ == PoolingMode::AvgPoolingWithPadding)
+			pooling_mode = CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING;
+		else
+			DEBUG_BREAK();
+		CUDNN_CALL(cudnnSetPoolingNdDescriptor(pooling_desc_, pooling_mode, CUDNN_PROPAGATE_NAN,
+			ndims, filter_shape_.data(), padding_.data(), strides_.data()));
+		CUDNN_CALL(cudnnSetTensorNdDescriptor(x_desc_, CUDNN_DATA_FLOAT, ndims + 2, x_dims, x_strides));
+		CUDNN_CALL(cudnnSetTensorNdDescriptor(y_desc_, CUDNN_DATA_FLOAT, ndims + 2, y_dims, y_strides));
+		float alpha = 1.f, beta = 0.f;
+		CUDNN_CALL(cudnnPoolingForward(graph->GetDevice()->GetCuDNNHandle(), pooling_desc_,
+			&alpha, x_desc_, x_data, &beta, y_desc_, y_data));
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *x_data = x[0]->GetData();
+		const float *y_data = y->GetData();
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+
+		float alpha = 1.f, beta = 1.f;
+		CUDNN_CALL(cudnnPoolingBackward(graph->GetDevice()->GetCuDNNHandle(), pooling_desc_,
+			&alpha, y_desc_, y_data, y_desc_, dEdY_data, x_desc_, x_data, &beta,
+			x_desc_, dEdX_data));
+	}
+
+private:
+	Shape filter_shape_, strides_, padding_;
+	PoolingMode mode_;
+	cudnnPoolingDescriptor_t pooling_desc_;
+	cudnnTensorDescriptor_t x_desc_, y_desc_;
+};
+
+template<typename Dummy>
+struct PoolingNodeFactory<Dummy, GPU> {
+	Node *Create(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding, PoolingMode mode) {
+		return new PoolingNodeGPU(node, filter_shape, strides, padding, mode);
+	}
+};
+
+template struct PoolingNodeFactory<void, GPU>;
+
 struct Empty {};
 
 static __global__ void ReduceSumBackwardKernel(int nelems, int size,

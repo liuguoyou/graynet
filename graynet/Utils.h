@@ -6,6 +6,12 @@
 
 #include <type_traits>
 
+#ifdef _MSC_VER
+#define FORCEINLINE		__forceinline
+#else
+#define FORCEINLINE
+#endif
+
 namespace detail {
 	template <class F, class Tuple, std::size_t... I>
 	constexpr decltype(auto) apply_impl(F &&f, Tuple &&t, std::index_sequence<I...>) {

@@ -71,6 +71,17 @@ struct SparseDotNodeFactory {
 	Node *Create(int lhs_node, int rhs_node);
 };
 
+enum class PoolingMode {
+	MaxPooling,
+	AvgPooling,
+	AvgPoolingWithPadding,
+};
+
+template<typename Dummy, DeviceType DeviceType>
+struct PoolingNodeFactory {
+	Node *Create(int node, const Shape &filter_shape, const Shape &strides, const Shape &padding, PoolingMode mode);
+};
+
 template<typename Dummy, DeviceType DeviceType>
 struct ReduceSumNodeFactory {
 	Node *Create(int node);
