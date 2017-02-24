@@ -152,6 +152,17 @@ static __global__ void LookupForwardKernel(int total, int emb_size, const int *i
 	}
 }
 
+static __global__ void LookupBackwardKernel(int total, int emb_size, const int *indices,
+	const float *dEdY, float *dEdX) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < total) {
+		int j = i / emb_size;
+		int k = i % emb_size;
+		// TODO: Use a proper reduction mechanism, and try to make the reduction deterministic.
+		atomicAdd(&dEdX[indices[j] * emb_size + k], dEdY[i]);
+	}
+}
+
 class LookupNodeGPU : public Node {
 public:
 	LookupNodeGPU(Graph *graph, int embeddings, int batch_size, const Shape &shape, const int *indices)
@@ -178,8 +189,11 @@ public:
 		float *dEdX_data = dEdX[0]->GetData();
 		int total = y->GetBatchSize() * y->GetShape().GetSize();
 		int emb_size = y->GetShape().GetDim(1);
-
-		REPORT_ERROR("GPU Backward kernel for Lookup() not implemented.");
+		
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (total + threadsPerBlock - 1) / threadsPerBlock;
+		LookupBackwardKernel<<<blocksPerGrid, threadsPerBlock>>>(total, emb_size, indices_,
+			dEdY_data, dEdX_data);
 	}
 
 private:
