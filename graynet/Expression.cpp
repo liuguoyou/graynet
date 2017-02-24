@@ -350,16 +350,56 @@ Expression operator+(const Expression &lhs, const Expression &rhs) {
 	return CreateBinaryOpNode<ElemAddForward, ElemAddBackward>(lhs, rhs);
 }
 
+Expression &operator+=(Expression &lhs, const Expression &rhs) {
+	lhs = lhs + rhs;
+	return lhs;
+}
+
+Expression &operator+=(Expression &lhs, float rhs) {
+	lhs = lhs + rhs;
+	return lhs;
+}
+
 Expression operator-(const Expression &lhs, const Expression &rhs) {
 	return CreateBinaryOpNode<ElemSubForward, ElemSubBackward>(lhs, rhs);
+}
+
+Expression &operator-=(Expression &lhs, const Expression &rhs) {
+	lhs = lhs - rhs;
+	return lhs;
+}
+
+Expression &operator-=(Expression &lhs, float rhs) {
+	lhs = lhs - rhs;
+	return lhs;
 }
 
 Expression operator*(const Expression &lhs, const Expression &rhs) {
 	return CreateBinaryOpNode<ElemMulForward, ElemMulBackward>(lhs, rhs);
 }
 
+Expression &operator*=(Expression &lhs, const Expression &rhs) {
+	lhs = lhs * rhs;
+	return lhs;
+}
+
+Expression &operator*=(Expression &lhs, float rhs) {
+	lhs = lhs * rhs;
+	return lhs;
+}
+
 Expression operator/(const Expression &lhs, const Expression &rhs) {
 	return CreateBinaryOpNode<ElemDivForward, ElemDivBackward>(lhs, rhs);
+}
+
+Expression &operator/=(Expression &lhs, const Expression &rhs) {
+	lhs = lhs / rhs;
+	return lhs;
+}
+
+Expression &operator/=(Expression &lhs, float rhs) {
+	lhs = lhs / rhs;
+	return lhs;
 }
 
 template<typename ForwardFunc, typename BackwardFunc>

@@ -143,6 +143,12 @@ Expression operator+(float lhs, const Expression &rhs);
 /*! Element-wise addition. */
 Expression operator+(const Expression &lhs, float rhs);
 
+/*! Element-wise addition. */
+Expression &operator+=(Expression &lhs, const Expression &rhs);
+
+/*! Element-wise addition. */
+Expression &operator+=(Expression &lhs, float rhs);
+
 /*! Element-wise subtraction. */
 Expression operator-(const Expression &lhs, const Expression &rhs);
 
@@ -151,6 +157,12 @@ Expression operator-(float lhs, const Expression &rhs);
 
 /*! Element-wise subtraction. */
 Expression operator-(const Expression &lhs, float rhs);
+
+/*! Element-wise subtraction. */
+Expression &operator-=(Expression &lhs, const Expression &rhs);
+
+/*! Element-wise subtraction. */
+Expression &operator-=(Expression &lhs, float rhs);
 
 /*! Element-wise multiplication. */
 Expression operator*(const Expression &lhs, const Expression &rhs);
@@ -161,6 +173,12 @@ Expression operator*(float lhs, const Expression &rhs);
 /*! Element-wise multiplication. */
 Expression operator*(const Expression &lhs, float rhs);
 
+/*! Element-wise multiplication. */
+Expression &operator*=(Expression &lhs, const Expression &rhs);
+
+/*! Element-wise multiplication. */
+Expression &operator*=(Expression &lhs, float rhs);
+
 /*! Element-wise division. */
 Expression operator/(const Expression &lhs, const Expression &rhs);
 
@@ -169,6 +187,12 @@ Expression operator/(float lhs, const Expression &rhs);
 
 /*! Element-wise division. */
 Expression operator/(const Expression &lhs, float rhs);
+
+/*! Element-wise division. */
+Expression &operator/=(Expression &lhs, const Expression &rhs);
+
+/*! Element-wise division. */
+Expression &operator/=(Expression &lhs, float rhs);
 
 /*! Element-wise negation: \f$ y = -x \f$ */
 Expression operator-(const Expression &x);
