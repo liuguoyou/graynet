@@ -9,6 +9,7 @@
 #include <cblas.h>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #ifdef USE_CUDA
 #include <cuda_runtime.h>

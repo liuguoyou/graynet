@@ -4,7 +4,9 @@
 
 /*! \cond NOSHOW */
 
+#include <functional>
 #include <type_traits>
+#include <utility>
 
 #ifdef _MSC_VER
 #define FORCEINLINE		__forceinline
@@ -12,10 +14,15 @@
 #define FORCEINLINE
 #endif
 
+#ifndef __NVCC__
 namespace detail {
 	template <class F, class Tuple, std::size_t... I>
 	constexpr decltype(auto) apply_impl(F &&f, Tuple &&t, std::index_sequence<I...>) {
+#ifdef _MSC_VER_
 		return std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))...);
+#else
+		return f(std::get<I>(std::forward<Tuple>(t))...);
+#endif
 	}
 }  // namespace detail
 
@@ -25,6 +32,7 @@ constexpr decltype(auto) apply(F &&f, Tuple &&t) {
 		std::forward<F>(f), std::forward<Tuple>(t),
 		std::make_index_sequence<std::tuple_size<typename std::decay<Tuple>::type>::value>{});
 }
+#endif
 
 #ifdef _MSC_VER
 #define DEBUG_BREAK()	__debugbreak()
@@ -35,7 +43,11 @@ constexpr decltype(auto) apply(F &&f, Tuple &&t) {
 
 [[noreturn]] void ReportError(const char *msg, ...);
 
+#ifdef _MSC_VER
 #define REPORT_ERROR(msg, ...) ReportError(msg, __VA_ARGS__)
+#else
+#define REPORT_ERROR(msg, ...) ReportError(msg, #__VA_ARGS__)
+#endif
 
 // Simple rule on whether to use DEBUG_BREAK() or REPORT_ERROR()
 // * If it means a bug in graynet, use DEBUG_BREAK().

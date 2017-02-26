@@ -4,6 +4,7 @@
 #include "Utils.h"
 
 #include <cmath>
+#include <cstring>
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #else
