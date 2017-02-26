@@ -24,7 +24,7 @@ include(cmake/AddSourceGroups.cmake)
 if(MSVC)
 	add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 else()
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++11")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++14")
 endif()
 
 add_subdirectory(graynet)
