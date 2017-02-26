@@ -1,0 +1,22 @@
+language: cpp
+
+matrix:
+  include:
+    - os: linux
+      compiler: gcc
+      dist: trusty
+      addons:
+        apt:
+          packages:
+            libopenblas-dev
+    - os: osx
+      compiler: clang
+
+before_script:
+  - cd $TRAVIS_BUILD_DIR
+  - mkdir build
+  - cd build
+  - cmake ..
+  
+script:
+  - make
