@@ -163,6 +163,19 @@ void Graph::DefineParameter(Expression *param, const char *name, const Shape &sh
 	d->scope_name_[d->scope_name_length_] = 0;
 }
 
+Expression Graph::GetParameter(const char *name) {
+	int scope_length = d->scope_name_length_;
+	AppendScopeName(name);
+	std::string str_name(d->scope_name_);
+	std::unordered_map<std::string, int>::const_iterator iter = d->parameter_names_.find(str_name);
+	Expression ret;
+	if (iter != d->parameter_names_.end())
+		ret = Expression(this, iter->second);
+	d->scope_name_length_ = scope_length;
+	d->scope_name_[d->scope_name_length_] = 0;
+	return ret;
+}
+
 void Graph::PushScope(const char *name) {
 	int len = (int)strlen(name);
 	d->scope_indices_.push_back(d->scope_name_length_);

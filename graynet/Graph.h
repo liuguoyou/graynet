@@ -42,6 +42,9 @@ public:
 	/*! Create or retrieve a parameter by name */
 	void DefineParameter(Expression *param, const char *name, const Shape &shape, InitMethod init_method = GlorotUniform);
 
+	/* Retrieve a parameter by name */
+	Expression GetParameter(const char *name);
+
 	/*! Push parameter scope */
 	void PushScope(const char *name);
 
