@@ -10,13 +10,13 @@ if(${GRAYNET_USE_CUDA})
 	find_package(CUDA REQUIRED)
 endif()
 
-# Set -DBLAS_LIBRARIES=`OpenBLAS dir`
-find_package(BLAS REQUIRED)
-
 # Infer BLAS include dir
 if(MSVC)
+	# Set -DBLAS_LIBRARIES=`OpenBLAS dir`
 	get_filename_component(BLAS_BASE_DIR ${BLAS_LIBRARIES} DIRECTORY)
 	include_directories(${BLAS_BASE_DIR}/../include)
+else()
+	find_package(BLAS REQUIRED)
 endif()
 
 include(cmake/AddSourceGroups.cmake)
