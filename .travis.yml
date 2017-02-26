@@ -1,22 +1,33 @@
 language: cpp
 
+notifications:
+  email: false
+
 matrix:
   include:
     - os: linux
       compiler: gcc
+      env: CC=gcc-5 CXX=g++-5
       dist: trusty
       addons:
         apt:
+          sources:
+            - ubuntu-toolchain-r-test
           packages:
-            libopenblas-dev
+            - libopenblas-dev
+            - gcc-5
+            - g++-5
     - os: osx
       compiler: clang
+
+install:
+  - curl https://cmake.org/files/v3.6/cmake-3.6.1-Linux-x86_64.tar.gz | sudo tar -x -z --strip-components 1 -C /usr
 
 before_script:
   - cd $TRAVIS_BUILD_DIR
   - mkdir build
   - cd build
-  - cmake ..
+  - cmake .. -DGRAYNET_USE_CUDA=OFF
   
 script:
   - make
