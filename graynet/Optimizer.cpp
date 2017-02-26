@@ -3,6 +3,7 @@
 #include "Utils.h"
 
 #include <cblas.h>
+#include <cmath>
 #ifdef USE_CUDA
 #include <cublas_v2.h>
 #include <host_defines.h>
