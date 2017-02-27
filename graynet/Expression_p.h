@@ -121,6 +121,11 @@ struct SliceNodeFactory {
 };
 
 template<typename Dummy, DeviceType DeviceType>
+struct DropoutNodeFactory {
+	Node *Create(int node, float p);
+};
+
+template<typename Dummy, DeviceType DeviceType>
 struct SoftmaxNodeFactory {
 	Node *Create(int node);
 };

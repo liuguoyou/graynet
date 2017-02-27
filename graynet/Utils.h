@@ -76,6 +76,17 @@ constexpr decltype(auto) apply(F &&f, Tuple &&t) {
 
 const char *GetCuBLASErrorString(int status);
 
+#define CURAND_CALL(stmt) \
+	do { \
+		curandStatus_t curand_status = (stmt); \
+		if (curand_status != CURAND_STATUS_SUCCESS) { \
+			fprintf(stderr, "%s failed, error: %s\n", #stmt, GetCuRANDErrorString((int)curand_status)); \
+			DEBUG_BREAK(); \
+		} \
+	} while (0)
+
+const char *GetCuRANDErrorString(int status);
+
 #define CUSPARSE_CALL(stmt) \
 	do { \
 		cusparseStatus_t cusparse_status = (stmt); \
@@ -95,6 +106,8 @@ const char *GetCuSPARSEErrorString(int status);
 			DEBUG_BREAK(); \
 		} \
 	} while (0)
+
+const char *GetCuSPARSEErrorString(int status);
 
 #endif
 

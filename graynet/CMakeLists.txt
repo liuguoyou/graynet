@@ -45,6 +45,6 @@ else()
 	add_library(graynet STATIC ${SRCS})
 endif()
 
-target_link_libraries(graynet ${BLAS_LIBRARIES} ${CUDNN_LIBRARIES} ${CUDA_cusparse_LIBRARY})
+target_link_libraries(graynet ${BLAS_LIBRARIES} ${CUDNN_LIBRARIES} ${CUDA_curand_LIBRARY} ${CUDA_cusparse_LIBRARY})
 
 target_include_directories(graynet PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)

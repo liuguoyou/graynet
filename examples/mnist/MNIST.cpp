@@ -64,11 +64,10 @@ static std::vector<DataPoint> LoadMNIST(const char *image_filename, const char *
 	return ret;
 }
 
-static Expression Model(Expression t) {
+static Expression Model(Expression t, bool is_train) {
 #if 1
 	t = ReLU(LinearLayer("l1", t, 128));
 	t = ReLU(LinearLayer("l2", t, 64));
-	t = Softmax(LinearLayer("l3", t, 10));
 #else
 	t = Reshape(t, Shape(1, kHeight, kWidth));
 	t = ReLU(ConvolutionLayer("conv1", t, 32, Shape(3, 3), Shape(1, 1), Shape(0, 0)));
@@ -76,8 +75,10 @@ static Expression Model(Expression t) {
 	t = MaxPooling(t, Shape(3, 3), Shape(1, 1), Shape(0, 0));
 	t = Flatten(t);
 	t = ReLU(LinearLayer("l1", t, 128));
-	t = Softmax(LinearLayer("l2", t, 10));
 #endif
+	if (is_train)
+		t = Dropout(t, 0.5);
+	t = Softmax(LinearLayer("softmax", t, 10));
 	return t;
 }
 
@@ -115,7 +116,7 @@ int main() {
 		std::vector<int> input_label;
 		ExtractBatch(input_data, input_label, trainset, batch_start, batch_size);
 		Expression t = BatchInput(&graph, batch_size, Shape(kHeight * kWidth), input_data.data());
-		t = Model(t);
+		t = Model(t, true);
 		accuracy += ClassificationAccuracy(t, batch_size, input_label.data()).Forward().ReduceSum();
 		t = CrossEntropy(t, batch_size, input_label.data());
 		loss += t.Forward().ReduceSum();
@@ -130,7 +131,7 @@ int main() {
 				std::vector<int> input_label;
 				ExtractBatch(input_data, input_label, testset, j, batch_size);
 				Expression t = BatchInput(&graph, batch_size, Shape(kHeight * kWidth), input_data.data());
-				t = Model(t);
+				t = Model(t, false);
 				test_accuracy += ClassificationAccuracy(t, batch_size, input_label.data()).Forward().ReduceSum();
 				graph.Clear();
 			}

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <random>
 #include <type_traits>
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
@@ -1479,6 +1480,53 @@ Expression Slice(const Expression &x, const Shape &start, const Shape &size) {
 		}
 	}
 	return CreateDeviceSpecificNode<SliceNodeFactory>(x.GetGraph(), size, x.GetNodeIndex(), start, size);
+}
+
+class DropoutNodeCPU : public Node {
+public:
+	DropoutNodeCPU(int node, float p) : Node{ node }, p_(p) {}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		std::mt19937 gen(graph->GetIncrementRandomSeed());
+		std::uniform_real_distribution<float> dist{ 0.f, 1.f };
+
+		const float *x_data = x[0]->GetData();
+		float *y_data = y->GetData();
+		int size = x[0]->GetBatchSize() * x[0]->GetShape().GetSize();
+		scales_ = (float *)graph->GetDevice()->AllocateMemory(size * sizeof(float), Device::ScratchMemoryPool);
+		float scale = 1.f / (1.f - p_);
+		for (int i = 0; i < size; i++) {
+			if (dist(gen) <= p_)
+				scales_[i] = 0.f;
+			else
+				scales_[i] = scale;
+			y_data[i] = x_data[i] * scales_[i];
+		}
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+		int size = x[0]->GetBatchSize() * x[0]->GetShape().GetSize();
+		for (int i = 0; i < size; i++)
+			dEdX_data[i] += dEdY_data[i] / scales_[i];
+	}
+
+private:
+	float p_;
+	mutable float *scales_;
+};
+
+template<typename Dummy>
+struct DropoutNodeFactory<Dummy, CPU> {
+	Node *Create(int node, float p) {
+		return new DropoutNodeCPU(node, p);
+	}
+};
+
+Expression Dropout(const Expression &x, float p) {
+	return CreateDeviceSpecificNode<DropoutNodeFactory>(x.GetGraph(), x.GetShape(), x.GetNodeIndex(), p);
 }
 
 class SoftmaxNodeCPU : public Node {

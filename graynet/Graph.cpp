@@ -54,6 +54,9 @@ public:
 
 	/*! Current parameter scope */
 	char scope_name_[kMaxScopeNameLength + 1];
+
+	/*! Current random seed */
+	int rng_seed_;
 };
 
 #define PARAMETER_INDEX(index)	(-(index) - 1)
@@ -63,6 +66,7 @@ Graph::Graph(Device *device) : d(new GraphPrivate()) {
 	d->rng_ = std::mt19937(clock());
 	d->scope_name_length_ = 0;
 	d->scope_name_[0] = 0;
+	d->rng_seed_ = 0;
 }
 
 Graph::~Graph() {
@@ -288,6 +292,10 @@ Expression Graph::AddNode(Node *node, const Shape &output_shape, bool sparse_out
 
 	int id = (int)d->nodes_.size() - 1;
 	return Expression(this, id);
+}
+
+int Graph::GetIncrementRandomSeed() {
+	return d->rng_seed_++;
 }
 
 Tensor Graph::Forward(const Expression &expression) {

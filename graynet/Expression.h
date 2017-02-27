@@ -305,6 +305,9 @@ Expression ReduceSum(const Expression &x);
 /*! Slice input */
 Expression Slice(const Expression &x, const Shape &start, const Shape &size);
 
+/*! Dropout */
+Expression Dropout(const Expression &x, float p);
+
 /*! @} */
 
 /*! \defgroup Loss_Functions */

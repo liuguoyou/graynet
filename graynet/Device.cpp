@@ -1,6 +1,7 @@
 #include "Device.h"
 #include "Utils.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -10,6 +11,7 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cudnn.h>
+#include <curand.h>
 #include <cusparse_v2.h>
 #endif
 
@@ -104,6 +106,7 @@ public:
 	cublasHandle_t cublas_handle_;
 	cusparseHandle_t cusparse_handle_;
 	cudnnHandle_t cudnn_handle_;
+	curandGenerator_t curand_generator_;
 
 	MemoryPool *pinned_scratch_memory_pool_;
 #endif
@@ -122,6 +125,11 @@ Device::Device(DeviceType device_type): d(new DevicePrivate()) {
 		CUBLAS_CALL(cublasCreate_v2(&d->cublas_handle_));
 		CUSPARSE_CALL(cusparseCreate(&d->cusparse_handle_));
 		CUDNN_CALL(cudnnCreate(&d->cudnn_handle_));
+		CURAND_CALL(curandCreateGenerator(&d->curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
+		CURAND_CALL(curandSetPseudoRandomGeneratorSeed(d->curand_generator_,
+			std::chrono::duration_cast<std::chrono::microseconds>(
+				std::chrono::high_resolution_clock::now().time_since_epoch()).count()));
+		CURAND_CALL(curandSetGeneratorOrdering(d->curand_generator_, CURAND_ORDERING_PSEUDO_SEEDED));
 	}
 	d->pinned_scratch_memory_pool_ = new MemoryPool(d->device_type_, PinnedScratchMemoryPool);
 #else
@@ -163,6 +171,11 @@ cusparseHandle_t Device::GetCuSPARSEHandle() const {
 cudnnHandle_t Device::GetCuDNNHandle() const {
 	return d->cudnn_handle_;
 }
+
+curandGenerator_t Device::GetCuRANDGenerator() const {
+	return d->curand_generator_;
+}
+
 #endif
 
 void *Device::AllocateMemory(int size, MemoryPoolType memory_pool) {

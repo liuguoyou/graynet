@@ -12,6 +12,8 @@ struct cusparseContext;
 typedef struct cusparseContext *cusparseHandle_t;
 struct cudnnContext;
 typedef struct cudnnContext *cudnnHandle_t;
+struct curandGenerator_st;
+typedef struct curandGenerator_st *curandGenerator_t;
 class DevicePrivate;
 class Device {
 public:
@@ -29,6 +31,8 @@ public:
 	cusparseHandle_t GetCuSPARSEHandle() const;
 	/*! \private */
 	cudnnHandle_t GetCuDNNHandle() const;
+	/*! \private */
+	curandGenerator_t GetCuRANDGenerator() const;
 #endif
 
 	/*! \private */

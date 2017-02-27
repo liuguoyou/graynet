@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <cudnn.h>
 #include <cub/block/block_reduce.cuh>
+#include <curand.h>
 #include <cusparse_v2.h>
 
 static const int kThreadsPerBlock = 128;
@@ -797,6 +798,71 @@ struct SliceNodeFactory<Dummy, GPU> {
 };
 
 template struct SliceNodeFactory<void, GPU>;
+
+static __global__ void DropoutForwardKernel(int n, float p, float mul_scale,
+	const float *probs, const float *x, float *y) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < n) {
+		if (probs[i] <= p)
+			y[i] = 0.f;
+		else
+			y[i] = x[i] * mul_scale;
+	}
+}
+
+static __global__ void DropoutBackwardKernel(int n, float p, float mul_scale,
+	const float *probs, const float *dEdY, float *dEdX) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < n) {
+		if (probs[i] > p)
+			dEdX[i] += dEdY[i] * mul_scale;
+	}
+}
+
+class DropoutNodeGPU : public Node {
+public:
+	DropoutNodeGPU(int node, float p) : Node{ node }, p_(p) {}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const float *x_data = x[0]->GetData();
+		float *y_data = y->GetData();
+		int size = x[0]->GetBatchSize() * x[0]->GetShape().GetSize();
+		probs_ = (float *)graph->GetDevice()->AllocateMemory(size * sizeof(float), Device::ScratchMemoryPool);
+
+		curandGenerator_t generator = graph->GetDevice()->GetCuRANDGenerator();
+		CURAND_CALL(curandGenerateUniform(generator, probs_, size));
+		float scale = 1.f / (1.f - p_);
+
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (size + threadsPerBlock - 1) / threadsPerBlock;
+		DropoutForwardKernel<<<blocksPerGrid, threadsPerBlock>>>(size, p_, scale, probs_, x_data, y_data);
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const float *dEdY_data = dEdY->GetData();
+		float *dEdX_data = dEdX[0]->GetData();
+		int size = x[0]->GetBatchSize() * x[0]->GetShape().GetSize();
+		float scale = 1.f - p_;
+		
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (size + threadsPerBlock - 1) / threadsPerBlock;
+		DropoutBackwardKernel<<<blocksPerGrid, threadsPerBlock>>>(size, p_, scale, probs_, dEdY_data, dEdX_data);
+	}
+
+private:
+	float p_;
+	mutable float *probs_;
+};
+
+template<typename Dummy>
+struct DropoutNodeFactory<Dummy, GPU> {
+	Node *Create(int node, float p) {
+		return new DropoutNodeGPU(node, p);
+	}
+};
+
+template struct DropoutNodeFactory<void, GPU>;
 
 class SoftmaxNodeGPU : public Node {
 public:

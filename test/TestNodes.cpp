@@ -4,7 +4,7 @@
 
 class NodeTest: public testing::Test {
 public:
-	NodeTest() : device(CPU), graph(&device) {
+	NodeTest() : device(GPU), graph(&device) {
 	}
 
 	void CheckGradient(const Expression &loss) {

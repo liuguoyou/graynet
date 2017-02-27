@@ -69,6 +69,9 @@ public:
 	/*! \private */
 	Expression AddNode(Node *node, const Shape &output_shape, bool sparse_output = false, int batch_size = -1);
 
+	/*! \private */
+	int GetIncrementRandomSeed();
+
 private:
 	friend class Expression;
 	friend class Optimizer;
