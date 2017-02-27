@@ -53,7 +53,7 @@ Expression Model(Expression t) {
 2. Minimal framework overhead. By using a custom GPU memory allocator and written all code in C++. GrayNet eliminates most framework overhead when you don't need it. But we don't stop here. As a compiled programming language, C++ is often criticized for having slow compilation times, which is bad for rapid iteration. In GrayNet, we do very hard job of optimizing compile time overhead. As an example, the whole repo of GrayNet builds in one minute using VS2015 with a laptop, including all the tests and examples. Unlike many other C++ frameworks, GrayNet avoids exposing bloated STL templates (even without vector!) to your code by carefully design the library interface and data structures. You also do not need to install and configure CUDA toolkit to use GPU if you use the dynamic library redistribution. So you can enjoy the efficiency of C++ without its compilation curses.
 
 # Documentation
-The documentation of GrayNet can be retrieved at https://graynet.rtfd.io.
+The documentation of GrayNet can be retrieved at http://graynet.rtfd.io.
 
 # Examples
 Code examples are located at the [examples](https://github.com/wishstudio/graynet/tree/master/examples) directory in the repo.

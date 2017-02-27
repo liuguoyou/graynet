@@ -19,6 +19,8 @@ else()
 	find_package(BLAS REQUIRED)
 endif()
 
+message("BLAS_LIBRARIES: ${BLAS_LIBRARIES}")
+
 include(cmake/AddSourceGroups.cmake)
 
 if(MSVC)
