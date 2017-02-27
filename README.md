@@ -1,6 +1,6 @@
 # graynet
 
-[![Documentation status](https://readthedocs.org/projects/graynet/badge/?version=latest)](http://graynet.readthedocs.io/en/latest/)
+[![Documentation status](https://readthedocs.org/projects/graynet/badge/?version=latest)](http://graynet.readthedocs.io/en/latest/) [![Build Status](https://travis-ci.org/wishstudio/graynet.svg?branch=master)](https://travis-ci.org/wishstudio/graynet)
 
 *efficiency, expressibility, bloatless - choose three*
 
