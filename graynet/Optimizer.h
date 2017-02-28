@@ -42,7 +42,8 @@ private:
 
 /*! Basic stochastic gradient descent optimizer.
  * This optimizer uses a constant learning rate for every update, no momentum/learning rate decay
- * is supported.
+ * is provided. You can use \ref UpdateLearningRate() to implement custom learning
+ * rate schedule.
  *
  * Update formula: \f[ \theta_{t+1} \leftarrow \theta_t - \eta\nabla{\theta_t} \f]
  */

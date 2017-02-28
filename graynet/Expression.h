@@ -264,10 +264,23 @@ Expression ReLU(const Expression &x);
 
 /*! \defgroup Linear_Algebra_Operations */
 /*! @{ */
-/*! Matrix multiplication */
+/*! General matrix multiplication.
+ *
+ * If both operands are vectors, a vector-dot is performed. (TODO)
+ * Otherwise, a general matrix multiplication is performed according to following conventions:
+ *
+ * * If an operand has rank 2, it is treated as a regular matrix.
+ * * If an operand has rank > 2, it is treated as a stack of matrices.
+ * * If left hand operand is a vector, an implicit dimension of size 1 is appended to
+ * its shape. In other words, it is treated as a row vector in matrix multiplication.
+ * * If right hand operand is a vector, an implicit dimension of size 1 is prepended to
+ * its shape. In other words, it is treated as a column vector in matrix multiplication.
+ *
+ * The operation is currently unsupported when both operands are stacks of matrices.
+ */
 Expression MatMul(const Expression &lhs, const Expression &rhs);
 
-/*! Vector dot (only sparse dot is supported for now) */
+/*! Vector dot */
 Expression Dot(const Expression &lhs, const Expression &rhs);
 
 /*! @} */
@@ -302,10 +315,17 @@ Expression Flatten(const Expression &x);
 /*! Reduce one dimension */
 Expression ReduceSum(const Expression &x);
 
-/*! Slice input */
+/*! Return a sub-tensor of the input tensor. The two parameters `start` and `size`
+ * specifies the slicing dimensions.
+ * \param start Starting index for each dimension.
+ * \param size Extraction count for each dimension.
+ */
 Expression Slice(const Expression &x, const Shape &start, const Shape &size);
 
-/*! Dropout */
+/*! Dropout operation. This will randomly zero out \f$ p \f$ fraction of input elements.
+ * The remaining values will be scaled by \f$ 1 / (1 - p) \f$.
+ * This function should not be used during inference.
+ */
 Expression Dropout(const Expression &x, float p);
 
 /*! @} */

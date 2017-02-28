@@ -743,56 +743,76 @@ class MatMulNode : public Node {
 public:
 	MatMulNode(int lhs, int rhs) : Node{ lhs, rhs } {}
 
+	void InferShapes(const Tensor *lhs, const Tensor *rhs, int *M, int *K, int *N,
+		int *left_stack_size, int *right_stack_size, int *y_stack_size) const {
+		const Shape &lhs_shape = lhs->GetShape();
+		const Shape &rhs_shape = rhs->GetShape();
+		*M = lhs_shape.GetDimCount() >= 2 ? lhs_shape.GetDim(lhs_shape.GetDimCount() - 2) : 1;
+		*K = lhs_shape.GetDim(lhs_shape.GetDimCount() - 1);
+		*N = rhs_shape.GetDimCount() >= 2 ? rhs_shape.GetDim(rhs_shape.GetDimCount() - 1) : 1;
+		*left_stack_size = lhs->GetBatchSize() * lhs_shape.GetSizeRange(0, lhs_shape.GetDimCount() - 2);
+		*right_stack_size = rhs->GetBatchSize() * rhs_shape.GetSizeRange(0, rhs_shape.GetDimCount() - 2);
+		*y_stack_size = (*left_stack_size > *right_stack_size) ? *left_stack_size : *right_stack_size;
+	}
+
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = L * R
-		const Shape &lhs_shape = x[0]->GetShape();
-		const Shape &rhs_shape = x[1]->GetShape();
-		int M = lhs_shape.GetDimCount() == 2 ? lhs_shape.GetDim(0) : 1;
-		int K = rhs_shape.GetDim(0);
-		int N = rhs_shape.GetDimCount() == 2 ? rhs_shape.GetDim(1) : 1;
 		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
+		int M, K, N;
+		int left_stack_size, right_stack_size, y_stack_size;
+		InferShapes(x[0], x[1], &M, &K, &N, &left_stack_size, &right_stack_size, &y_stack_size);
 		float *y_data = y->GetData();
-		if (x[0]->GetBatchSize() == 1 && rhs_shape.GetDimCount() == 1) {
+		if (left_stack_size == 1 && N == 1) {
 			SGEMM(graph->GetDevice(), CblasNoTrans, CblasTrans, CblasTrans,
-				M, N * x[1]->GetBatchSize(), K, 1.f, lhs_data, rhs_data, 0.f, y_data);
+				M, N * right_stack_size, K, 1.f, lhs_data, rhs_data, 0.f, y_data);
+		}
+		else if (right_stack_size == 1) {
+			SGEMM(graph->GetDevice(), CblasNoTrans, CblasNoTrans, CblasNoTrans,
+				M * left_stack_size, N, K, 1.f, lhs_data, rhs_data, 0.f, y_data);
 		}
 		else {
 			BatchSGEMM(graph->GetDevice(), CblasNoTrans, CblasNoTrans,
 				M, N, K,
 				1.f, lhs_data, rhs_data, 0.f, y_data,
-				x[0]->GetBatchSize(), x[1]->GetBatchSize(), y->GetBatchSize());
+				left_stack_size, right_stack_size, y_stack_size);
 		}
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		const Shape &lhs_shape = x[0]->GetShape();
-		const Shape &rhs_shape = x[1]->GetShape();
-		int M = lhs_shape.GetDimCount() == 2 ? lhs_shape.GetDim(0) : 1;
-		int K = rhs_shape.GetDim(0);
-		int N = rhs_shape.GetDimCount() == 2 ? rhs_shape.GetDim(1) : 1;
+		int M, K, N;
+		int left_stack_size, right_stack_size, y_stack_size;
+		InferShapes(x[0], x[1], &M, &K, &N, &left_stack_size, &right_stack_size, &y_stack_size);
 		const float *dEdY_data = dEdY->GetData();
 		const float *lhs_data = x[0]->GetData(), *rhs_data = x[1]->GetData();
 		float *dEdL_data = dEdX[0]->GetData(), *dEdR_data = dEdX[1]->GetData();
 		// dEdL += dEdY * R'
 		// dEdR += L' * dEdY
-		if (x[0]->GetBatchSize() == 1 && rhs_shape.GetDimCount() == 1) {
+		if (left_stack_size == 1 && N == 1) {
 			SGEMM(graph->GetDevice(), CblasTrans, CblasNoTrans, CblasNoTrans,
-				M, K, N * x[1]->GetBatchSize(),
+				M, K, N * right_stack_size,
 				1.f, dEdY_data, rhs_data, 1.f, dEdL_data);
 			SGEMM(graph->GetDevice(), CblasTrans, CblasTrans, CblasTrans,
-				K, N * x[1]->GetBatchSize(), M,
+				K, N * right_stack_size, M,
+				1.f, lhs_data, dEdY_data, 1.f, dEdR_data);
+		}
+		else if (right_stack_size == 1) {
+			SGEMM(graph->GetDevice(), CblasNoTrans, CblasTrans, CblasNoTrans,
+				M * left_stack_size, K, N,
+				1.f, dEdY_data, rhs_data, 1.f, dEdL_data);
+			SGEMM(graph->GetDevice(), CblasTrans, CblasNoTrans, CblasNoTrans,
+				K, N, M * left_stack_size,
 				1.f, lhs_data, dEdY_data, 1.f, dEdR_data);
 		}
 		else {
 			BatchSGEMM(graph->GetDevice(), CblasNoTrans, CblasTrans,
 				M, K, N,
 				1.f, dEdY_data, rhs_data, 1.f, dEdL_data,
-				dEdY->GetBatchSize(), x[1]->GetBatchSize(), dEdX[0]->GetBatchSize());
+				y_stack_size, right_stack_size, left_stack_size);
 			BatchSGEMM(graph->GetDevice(), CblasTrans, CblasNoTrans,
 				K, N, M,
 				1.f, lhs_data, dEdY_data, 1.f, dEdR_data,
-				x[0]->GetBatchSize(), dEdY->GetBatchSize(), dEdX[1]->GetBatchSize());
+				left_stack_size, y_stack_size, right_stack_size);
 		}
 	}
 };
@@ -800,33 +820,47 @@ public:
 Expression MatMul(const Expression &lhs, const Expression &rhs) {
 	/* Infer output shape. */
 	const Shape &lhs_shape = lhs.GetShape(), &rhs_shape = rhs.GetShape();
-	if (lhs_shape.GetDimCount() > 2)
-		REPORT_ERROR("Left operand is not a vector or matrix.");
-	if (rhs_shape.GetDimCount() > 2)
-		REPORT_ERROR("Right operand is not a vector or matrix.");
 	if (lhs_shape.GetDimCount() == 1 && rhs_shape.GetDimCount() == 1)
 		REPORT_ERROR("Left and right operands are both vectors, use Dot() for now.");
+	if (lhs_shape.GetDimCount() > 2 && rhs_shape.GetDimCount() > 2)
+		REPORT_ERROR("MatMul() does not currently support the case when both inputs are stacks of matrices.");
 	Shape output_shape;
+	if (lhs_shape.GetDimCount() > 2) {
+		for (int i = 0; i < lhs_shape.GetDimCount() - 2; i++)
+			output_shape.PushDim(lhs_shape.GetDim(i));
+	}
+	else if (rhs_shape.GetDimCount() > 2) {
+		for (int i = 0; i < rhs_shape.GetDimCount() - 2; i++)
+			output_shape.PushDim(rhs_shape.GetDim(i));
+	}
 	if (lhs_shape.GetDimCount() == 1) {
-		if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0)) {
+		if (lhs_shape.GetDim(0) != rhs_shape.GetDim(rhs_shape.GetDimCount() - 2)) {
 			REPORT_ERROR("Dimension mismatch for vector-matrix multiplication: (%d) * (%d, %d).",
-				lhs_shape.GetDim(0), rhs_shape.GetDim(0), rhs_shape.GetDim(1));
+				lhs_shape.GetDim(0),
+				rhs_shape.GetDim(rhs_shape.GetDimCount() - 1),
+				rhs_shape.GetDim(rhs_shape.GetDimCount() - 2));
 		}
-		output_shape = Shape(rhs_shape.GetDim(1));
+		output_shape.PushDim(rhs_shape.GetDim(rhs_shape.GetDimCount() - 1));
 	}
 	else if (rhs_shape.GetDimCount() == 1) {
-		if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0)) {
+		if (lhs_shape.GetDim(lhs_shape.GetDimCount() - 1) != rhs_shape.GetDim(0)) {
 			REPORT_ERROR("Dimension mismatch for matrix-vector multiplication: (%d) * (%d, %d).",
-				lhs_shape.GetDim(0), lhs_shape.GetDim(1), rhs_shape.GetDim(0));
+				lhs_shape.GetDim(lhs_shape.GetDimCount() - 2),
+				lhs_shape.GetDim(lhs_shape.GetDimCount() - 1),
+				rhs_shape.GetDim(0));
 		}
-		output_shape = Shape(lhs_shape.GetDim(0));
+		output_shape.PushDim(lhs_shape.GetDim(lhs_shape.GetDimCount() - 2));
 	}
 	else {
-		if (lhs_shape.GetDim(1) != rhs_shape.GetDim(0)) {
+		if (lhs_shape.GetDim(lhs_shape.GetDimCount() - 1) != rhs_shape.GetDim(rhs_shape.GetDimCount() - 2)) {
 			REPORT_ERROR("Dimension mismatch for matrix-matrix multiplication: (%d, %d) * (%d, %d).",
-				lhs_shape.GetDim(0), lhs_shape.GetDim(1), rhs_shape.GetDim(0), rhs_shape.GetDim(1));
+				lhs_shape.GetDim(lhs_shape.GetDimCount() - 2),
+				lhs_shape.GetDim(lhs_shape.GetDimCount() - 1),
+				rhs_shape.GetDim(rhs_shape.GetDimCount() - 1),
+				rhs_shape.GetDim(rhs_shape.GetDimCount() - 2));
 		}
-		output_shape = Shape(lhs_shape.GetDim(0), rhs_shape.GetDim(1));
+		output_shape.PushDim(lhs_shape.GetDim(lhs_shape.GetDimCount() - 2));
+		output_shape.PushDim(rhs_shape.GetDim(rhs_shape.GetDimCount() - 1));
 	}
 
 	Graph *graph = lhs.GetGraph();

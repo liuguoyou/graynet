@@ -8,12 +8,10 @@ Expression LinearLayer::operator()(const char *name, const Expression &x, int ou
 	Graph *graph = x.GetGraph();
 	graph->PushScope(name);
 	const Shape &shape = x.GetShape();
-	if (shape.GetDimCount() != 1) // TODO: Relax this constraint
-		REPORT_ERROR("Only 1D input is supported.");
-	int input_dim = shape.GetDim(0);
-	graph->DefineParameter(&w, "w", Shape(output_dim, input_dim));
+	int input_dim = shape.GetDim(shape.GetDimCount() - 1);
+	graph->DefineParameter(&w, "w", Shape(input_dim, output_dim));
 	graph->DefineParameter(&b, "b", Shape(output_dim));
-	result = MatMul(w, x) + b;
+	result = MatMul(x, w) + b;
 	graph->PopScope();
 	return result;
 }
