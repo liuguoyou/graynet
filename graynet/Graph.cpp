@@ -108,7 +108,7 @@ Expression Graph::AddParameter(const Shape &shape, InitMethod init_method) {
 	switch (init_method) {
 	case GlorotUniform: {
 		int fan_cnt = 0;
-		for (int i = 0; i < shape.GetDimCount(); i++)
+		for (int i = 0; i < shape.GetRank(); i++)
 			fan_cnt += shape.GetDim(i);
 		UniformInit(parameter_data, size, sqrt(6.f / fan_cnt));
 		break;
@@ -223,7 +223,7 @@ void Graph::ClearForwardCache() {
 	// Input nodes also use scratch tensors so we cannot clean up memory cleanly.
 	// As for now this function is only called from CheckGradient() so leaking a bit of
 	// memory is not a big issue here.
-	//d->device_->ClearMemoryPool(Device::ScratchMemoryPool);
+	d->device_->ClearMemoryPool(Device::ScratchMemoryPool);
 	//d->device_->ClearMemoryPool(Device::PinnedScratchMemoryPool);
 }
 

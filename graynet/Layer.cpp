@@ -2,13 +2,11 @@
 #include "Layer.h"
 #include "Utils.h"
 
-#include <cstdlib>
-
 Expression LinearLayer::operator()(const char *name, const Expression &x, int output_dim) {
 	Graph *graph = x.GetGraph();
 	graph->PushScope(name);
 	const Shape &shape = x.GetShape();
-	int input_dim = shape.GetDim(shape.GetDimCount() - 1);
+	int input_dim = shape.GetDim(shape.GetRank() - 1);
 	graph->DefineParameter(&w, "w", Shape(input_dim, output_dim));
 	graph->DefineParameter(&b, "b", Shape(output_dim));
 	result = MatMul(x, w) + b;
@@ -30,7 +28,7 @@ Expression ConvolutionLayer::operator()(const char *name, const Expression &x,
 	if (!b.IsValid()) {
 		Shape b_shape;
 		b_shape.PushDim(output_channels);
-		for (int i = 0; i < kernel.GetDimCount(); i++)
+		for (int i = 0; i < kernel.GetRank(); i++)
 			b_shape.PushDim(1);
 		graph->DefineParameter(&b, "b", b_shape);
 	}

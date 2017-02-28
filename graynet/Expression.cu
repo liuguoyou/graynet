@@ -246,7 +246,7 @@ public:
 		const Shape &y_shape = y->GetShape();
 
 		int nelems = y_batch_size * y_shape.GetSize();
-		int ndims = 1 + y_shape.GetDimCount();
+		int ndims = 1 + y_shape.GetRank();
 		BinaryForwardDims forward;
 		forward.elems[ndims - 1] = 1;
 		for (int i = ndims - 2; i >= 0; i--)
@@ -272,7 +272,7 @@ public:
 		float *dEdL_data = dEdX[0]->GetData(), *dEdR_data = dEdX[1]->GetData();
 		const Shape &lhs_shape = x[0]->GetShape(), &rhs_shape = x[1]->GetShape();
 		const Shape &y_shape = y->GetShape();
-		int ndims = 1 + y_shape.GetDimCount();
+		int ndims = 1 + y_shape.GetRank();
 
 		int lhs_dims[kMaxTensorDim + 1], rhs_dims[kMaxTensorDim + 1];
 		int y_dims[kMaxTensorDim + 1];
@@ -604,7 +604,7 @@ public:
 		const Shape &y_shape = y->GetShape();
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
-		int ndims = y->GetShape().GetDimCount() - 1;
+		int ndims = y->GetShape().GetRank() - 1;
 
 		int x_dims[CUDNN_DIM_MAX], y_dims[CUDNN_DIM_MAX];
 		x_dims[0] = x[0]->GetBatchSize();
@@ -759,7 +759,7 @@ public:
 	SliceNodeGPU(int node, const Shape &start, const Shape &size) : Node{ node }, start_(start), size_(size) {}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
-		int ndims = x[0]->GetShape().GetDimCount() + 1;
+		int ndims = x[0]->GetShape().GetRank() + 1;
 		GetTensorStrides(x[0], desc_.strides);
 		base_index_ = 0;
 		for (int i = 1; i < ndims; i++)
@@ -777,7 +777,7 @@ public:
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		int ndims = x[0]->GetShape().GetDimCount() + 1;
+		int ndims = x[0]->GetShape().GetRank() + 1;
 		int threadsPerBlock = kThreadsPerBlock;
 		int blocksPerGrid = (count_ + threadsPerBlock - 1) / threadsPerBlock;
 		SliceBackwardKernel<<<blocksPerGrid, threadsPerBlock>>>(count_, base_index_, ndims,
@@ -871,9 +871,9 @@ public:
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = exp(x_i) / sum(exp(x_i))
 		const Shape &input_shape = x[0]->GetShape();
-		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 1);
+		int size = input_shape.GetSizeRange(0, input_shape.GetRank() - 1);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
 
@@ -891,9 +891,9 @@ public:
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
 		// dY/dX_i = y_i*dEdy_i - y_i*sum_j{y_j*dEdy_j}
 		const Shape &input_shape = x[0]->GetShape();
-		int size = x[0]->GetShape().GetSizeRange(0, input_shape.GetDimCount() - 1);
+		int size = x[0]->GetShape().GetSizeRange(0, input_shape.GetRank() - 1);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();
 		float *dEdX_data = dEdX[0]->GetData();
@@ -949,9 +949,9 @@ public:
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const Shape &input_shape = x[0]->GetShape();
-		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
+		int size = input_shape.GetSizeRange(0, input_shape.GetRank() - 2);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
 
@@ -964,9 +964,9 @@ public:
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
 		const Shape &input_shape = x[0]->GetShape();
-		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
+		int size = input_shape.GetSizeRange(0, input_shape.GetRank() - 2);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		const float *x_data = x[0]->GetData();
 		const float *dEdY_data = dEdY->GetData();
 		float *dEdX_data = dEdX[0]->GetData();
@@ -1023,9 +1023,9 @@ public:
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const Shape &input_shape = x[0]->GetShape();
-		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
+		int size = input_shape.GetSizeRange(0, input_shape.GetRank() - 2);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
 

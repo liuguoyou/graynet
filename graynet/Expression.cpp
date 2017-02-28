@@ -107,7 +107,7 @@ public:
 	SparseInputNode(Graph *graph, int batch_size, const Shape &shape, int nonzero_count,
 		const float *sparse_data, const int *batch_indices, const int *indices)
 		: Node{}, batch_size_(batch_size), shape_(shape), nonzero_count_(nonzero_count) {
-		if (shape.GetDimCount() != 1)
+		if (shape.GetRank() != 1)
 			REPORT_ERROR("Shape of sparse input must be 1D.");
 		sparse_data_ = (float *)PinMemory(graph->GetDevice(), sparse_data, nonzero_count * sizeof(float));
 		batch_indices_ = (int *)PinMemory(graph->GetDevice(), batch_indices, (batch_size + 1) * sizeof(int));
@@ -203,7 +203,7 @@ Expression BatchLookup(const Expression &embeddings, int batch_size, const Shape
 	Graph *graph = embeddings.GetGraph();
 	if (embeddings.GetBatchSize() != 1)
 		REPORT_ERROR("Embedding table must be of batch size 1.");
-	if (embeddings.GetShape().GetDimCount() != 2)
+	if (embeddings.GetShape().GetRank() != 2)
 		REPORT_ERROR("Embedding table must be of rank 2.");
 	int emb_size = embeddings.GetShape().GetDim(1);
 	Shape output_shape = shape;
@@ -267,7 +267,7 @@ public:
 		GetTensorStrides(x[0], lhs_strides);
 		GetTensorStrides(x[1], rhs_strides);
 		GetTensorStrides(y, y_strides);
-		int ndims = y->GetShape().GetDimCount() + 1;
+		int ndims = y->GetShape().GetRank() + 1;
 		int dims[kMaxTensorDim + 1];
 		GetTensorDims(y, dims);
 		auto transform_func = [&](int lhs_index, int rhs_index, int y_index) {
@@ -290,7 +290,7 @@ public:
 		GetTensorStrides(x[0], lhs_strides);
 		GetTensorStrides(x[1], rhs_strides);
 		GetTensorStrides(y, y_strides);
-		int ndims = y->GetShape().GetDimCount() + 1;
+		int ndims = y->GetShape().GetRank() + 1;
 		int dims[kMaxTensorDim + 1];
 		GetTensorDims(y, dims);
 		auto transform_func = [&](int lhs_index, int rhs_index, int y_index) {
@@ -312,11 +312,11 @@ struct BinaryOpNodeFactory<CPU, ForwardFunc, BackwardFunc> {
 
 static Shape GetBroadcastingOutputShape(const Shape &lhs_shape, const Shape &rhs_shape) {
 	// Broadcasting
-	if (lhs_shape.GetDimCount() != rhs_shape.GetDimCount()) {
+	if (lhs_shape.GetRank() != rhs_shape.GetRank()) {
 		REPORT_ERROR("Input operands have different ranks (%d and %d).",
-			lhs_shape.GetDimCount(), rhs_shape.GetDimCount());
+			lhs_shape.GetRank(), rhs_shape.GetRank());
 	}
-	int ndims = lhs_shape.GetDimCount();
+	int ndims = lhs_shape.GetRank();
 	Shape shape;
 	for (int i = 0; i < ndims; i++) {
 		if (lhs_shape.GetDim(i) == 1)
@@ -747,11 +747,11 @@ public:
 		int *left_stack_size, int *right_stack_size, int *y_stack_size) const {
 		const Shape &lhs_shape = lhs->GetShape();
 		const Shape &rhs_shape = rhs->GetShape();
-		*M = lhs_shape.GetDimCount() >= 2 ? lhs_shape.GetDim(lhs_shape.GetDimCount() - 2) : 1;
-		*K = lhs_shape.GetDim(lhs_shape.GetDimCount() - 1);
-		*N = rhs_shape.GetDimCount() >= 2 ? rhs_shape.GetDim(rhs_shape.GetDimCount() - 1) : 1;
-		*left_stack_size = lhs->GetBatchSize() * lhs_shape.GetSizeRange(0, lhs_shape.GetDimCount() - 2);
-		*right_stack_size = rhs->GetBatchSize() * rhs_shape.GetSizeRange(0, rhs_shape.GetDimCount() - 2);
+		*M = lhs_shape.GetRank() >= 2 ? lhs_shape.GetDim(lhs_shape.GetRank() - 2) : 1;
+		*K = lhs_shape.GetDim(lhs_shape.GetRank() - 1);
+		*N = rhs_shape.GetRank() >= 2 ? rhs_shape.GetDim(rhs_shape.GetRank() - 1) : 1;
+		*left_stack_size = lhs->GetBatchSize() * lhs_shape.GetSizeRange(0, lhs_shape.GetRank() - 2);
+		*right_stack_size = rhs->GetBatchSize() * rhs_shape.GetSizeRange(0, rhs_shape.GetRank() - 2);
 		*y_stack_size = (*left_stack_size > *right_stack_size) ? *left_stack_size : *right_stack_size;
 	}
 
@@ -820,47 +820,47 @@ public:
 Expression MatMul(const Expression &lhs, const Expression &rhs) {
 	/* Infer output shape. */
 	const Shape &lhs_shape = lhs.GetShape(), &rhs_shape = rhs.GetShape();
-	if (lhs_shape.GetDimCount() == 1 && rhs_shape.GetDimCount() == 1)
+	if (lhs_shape.GetRank() == 1 && rhs_shape.GetRank() == 1)
 		REPORT_ERROR("Left and right operands are both vectors, use Dot() for now.");
-	if (lhs_shape.GetDimCount() > 2 && rhs_shape.GetDimCount() > 2)
+	if (lhs_shape.GetRank() > 2 && rhs_shape.GetRank() > 2)
 		REPORT_ERROR("MatMul() does not currently support the case when both inputs are stacks of matrices.");
 	Shape output_shape;
-	if (lhs_shape.GetDimCount() > 2) {
-		for (int i = 0; i < lhs_shape.GetDimCount() - 2; i++)
+	if (lhs_shape.GetRank() > 2) {
+		for (int i = 0; i < lhs_shape.GetRank() - 2; i++)
 			output_shape.PushDim(lhs_shape.GetDim(i));
 	}
-	else if (rhs_shape.GetDimCount() > 2) {
-		for (int i = 0; i < rhs_shape.GetDimCount() - 2; i++)
+	else if (rhs_shape.GetRank() > 2) {
+		for (int i = 0; i < rhs_shape.GetRank() - 2; i++)
 			output_shape.PushDim(rhs_shape.GetDim(i));
 	}
-	if (lhs_shape.GetDimCount() == 1) {
-		if (lhs_shape.GetDim(0) != rhs_shape.GetDim(rhs_shape.GetDimCount() - 2)) {
+	if (lhs_shape.GetRank() == 1) {
+		if (lhs_shape.GetDim(0) != rhs_shape.GetDim(rhs_shape.GetRank() - 2)) {
 			REPORT_ERROR("Dimension mismatch for vector-matrix multiplication: (%d) * (%d, %d).",
 				lhs_shape.GetDim(0),
-				rhs_shape.GetDim(rhs_shape.GetDimCount() - 1),
-				rhs_shape.GetDim(rhs_shape.GetDimCount() - 2));
+				rhs_shape.GetDim(rhs_shape.GetRank() - 1),
+				rhs_shape.GetDim(rhs_shape.GetRank() - 2));
 		}
-		output_shape.PushDim(rhs_shape.GetDim(rhs_shape.GetDimCount() - 1));
+		output_shape.PushDim(rhs_shape.GetDim(rhs_shape.GetRank() - 1));
 	}
-	else if (rhs_shape.GetDimCount() == 1) {
-		if (lhs_shape.GetDim(lhs_shape.GetDimCount() - 1) != rhs_shape.GetDim(0)) {
+	else if (rhs_shape.GetRank() == 1) {
+		if (lhs_shape.GetDim(lhs_shape.GetRank() - 1) != rhs_shape.GetDim(0)) {
 			REPORT_ERROR("Dimension mismatch for matrix-vector multiplication: (%d) * (%d, %d).",
-				lhs_shape.GetDim(lhs_shape.GetDimCount() - 2),
-				lhs_shape.GetDim(lhs_shape.GetDimCount() - 1),
+				lhs_shape.GetDim(lhs_shape.GetRank() - 2),
+				lhs_shape.GetDim(lhs_shape.GetRank() - 1),
 				rhs_shape.GetDim(0));
 		}
-		output_shape.PushDim(lhs_shape.GetDim(lhs_shape.GetDimCount() - 2));
+		output_shape.PushDim(lhs_shape.GetDim(lhs_shape.GetRank() - 2));
 	}
 	else {
-		if (lhs_shape.GetDim(lhs_shape.GetDimCount() - 1) != rhs_shape.GetDim(rhs_shape.GetDimCount() - 2)) {
+		if (lhs_shape.GetDim(lhs_shape.GetRank() - 1) != rhs_shape.GetDim(rhs_shape.GetRank() - 2)) {
 			REPORT_ERROR("Dimension mismatch for matrix-matrix multiplication: (%d, %d) * (%d, %d).",
-				lhs_shape.GetDim(lhs_shape.GetDimCount() - 2),
-				lhs_shape.GetDim(lhs_shape.GetDimCount() - 1),
-				rhs_shape.GetDim(rhs_shape.GetDimCount() - 1),
-				rhs_shape.GetDim(rhs_shape.GetDimCount() - 2));
+				lhs_shape.GetDim(lhs_shape.GetRank() - 2),
+				lhs_shape.GetDim(lhs_shape.GetRank() - 1),
+				rhs_shape.GetDim(rhs_shape.GetRank() - 1),
+				rhs_shape.GetDim(rhs_shape.GetRank() - 2));
 		}
-		output_shape.PushDim(lhs_shape.GetDim(lhs_shape.GetDimCount() - 2));
-		output_shape.PushDim(rhs_shape.GetDim(rhs_shape.GetDimCount() - 1));
+		output_shape.PushDim(lhs_shape.GetDim(lhs_shape.GetRank() - 2));
+		output_shape.PushDim(rhs_shape.GetDim(rhs_shape.GetRank() - 1));
 	}
 
 	Graph *graph = lhs.GetGraph();
@@ -922,7 +922,7 @@ struct SparseDotNodeFactory<Dummy, CPU> {
 
 Expression Dot(const Expression &lhs, const Expression &rhs) {
 	const Shape &lhs_shape = lhs.GetShape(), &rhs_shape = rhs.GetShape();
-	if (lhs_shape.GetDimCount() != 1 || rhs_shape.GetDimCount() != 1)
+	if (lhs_shape.GetRank() != 1 || rhs_shape.GetRank() != 1)
 		REPORT_ERROR("Dot only supports vector inputs.");
 	if (lhs_shape.GetDim(0) != rhs_shape.GetDim(0))
 		REPORT_ERROR("Length of dot operands mismatch.");
@@ -947,12 +947,12 @@ static Shape FilterForwardShape(const Shape &x_shape, const Shape &filter_shape,
 	const Shape &strides, const Shape &padding, bool is_pooling) {
 	int filter_window_offset = is_pooling ? 0 : 2;
 
-	if (x_shape.GetDimCount() < 2)
+	if (x_shape.GetRank() < 2)
 		REPORT_ERROR("Input must have at least rank 2.");
-	int dims = x_shape.GetDimCount() - 1;
-	if (filter_shape.GetDimCount() != filter_window_offset + dims)
+	int dims = x_shape.GetRank() - 1;
+	if (filter_shape.GetRank() != filter_window_offset + dims)
 		REPORT_ERROR("Incompatible filter shape.");
-	if (strides.GetDimCount() != dims)
+	if (strides.GetRank() != dims)
 		REPORT_ERROR("Incompatible strides.");
 	int input_channels = x_shape.GetDim(0);
 	int output_channels;
@@ -1005,7 +1005,7 @@ public:
 		const float *x_data = x[0]->GetData();
 		const float *filter_data = x[1]->GetData();
 		float *y_data = y->GetData();
-		int dims = y->GetShape().GetDimCount() - 1;
+		int dims = y->GetShape().GetRank() - 1;
 
 		if (graph->GetDeviceType() == CPU)
 			REPORT_ERROR("Convolution is only implemented in GPU.");
@@ -1280,7 +1280,7 @@ public:
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
 		int batch_size = y->GetBatchSize() * y_shape.GetDim(0);
-		int ndims = y_shape.GetDimCount() - 1;
+		int ndims = y_shape.GetRank() - 1;
 		int x_strides[kMaxTensorDim + 1];
 		GetTensorStrides(x[0], x_strides);
 		if (x_strides[1] == 0)
@@ -1317,7 +1317,7 @@ public:
 		const float *dEdY_data = dEdY->GetData();
 		float *dEdX_data = dEdX[0]->GetData();
 		int batch_size = y->GetBatchSize() * y_shape.GetDim(0);
-		int ndims = y->GetShape().GetDimCount() - 1;
+		int ndims = y->GetShape().GetRank() - 1;
 		int x_strides[kMaxTensorDim + 1];
 		GetTensorStrides(x[0], x_strides);
 		if (x_strides[1] == 0)
@@ -1460,7 +1460,7 @@ public:
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
-		int ndims = x[0]->GetShape().GetDimCount() + 1;
+		int ndims = x[0]->GetShape().GetRank() + 1;
 		GetTensorStrides(x[0], x_strides_);
 		GetTensorStrides(y, y_strides_);
 		GetTensorDims(y, dims_);
@@ -1478,7 +1478,7 @@ public:
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
 		const float *dEdY_data = dEdY->GetData();
 		float *dEdX_data = dEdX[0]->GetData();
-		int ndims = x[0]->GetShape().GetDimCount() + 1;
+		int ndims = x[0]->GetShape().GetRank() + 1;
 
 		auto transform_func = [&](int x_index, int y_index) {
 			dEdX_data[base_index_ + x_index] += dEdY_data[y_index];
@@ -1501,11 +1501,11 @@ struct SliceNodeFactory<Dummy, CPU> {
 
 Expression Slice(const Expression &x, const Shape &start, const Shape &size) {
 	const Shape &shape = x.GetShape();
-	if (start.GetDimCount() != size.GetDimCount())
+	if (start.GetRank() != size.GetRank())
 		REPORT_ERROR("Rank mismatch for start and size parameters.");
-	if (shape.GetDimCount() != start.GetDimCount())
+	if (shape.GetRank() != start.GetRank())
 		REPORT_ERROR("Rank mismatch for input and given slicing range.");
-	for (int i = 0; i < start.GetDimCount(); i++) {
+	for (int i = 0; i < start.GetRank(); i++) {
 		if (start.GetDim(i) < 0 || start.GetDim(i) >= shape.GetDim(i)
 			|| start.GetDim(i) + size.GetDim(i) > shape.GetDim(i)) {
 			REPORT_ERROR("Slicing out of range for dimension: %d. "
@@ -1570,9 +1570,9 @@ public:
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = exp(x_i) / sum(exp(x_i))
 		const Shape &input_shape = x[0]->GetShape();
-		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 1);
+		int size = input_shape.GetSizeRange(0, input_shape.GetRank() - 1);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		// Softmax function
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
@@ -1599,9 +1599,9 @@ public:
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
 		// dY/dX_i = y_i*dEdy_i - y_i*sum_j{y_j*dEdy_j}
 		const Shape &input_shape = x[0]->GetShape();
-		int size = x[0]->GetShape().GetSizeRange(0, input_shape.GetDimCount() - 1);
+		int size = x[0]->GetShape().GetSizeRange(0, input_shape.GetRank() - 1);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		const float *y_data = y->GetData();
 		const float *dEdY_data = dEdY->GetData();
 		float *dEdX_data = dEdX[0]->GetData();
@@ -1650,9 +1650,9 @@ public:
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = -log(x_k)
 		const Shape &input_shape = x[0]->GetShape();
-		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
+		int size = input_shape.GetSizeRange(0, input_shape.GetRank() - 2);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		// Cross entropy loss
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
@@ -1666,9 +1666,9 @@ public:
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
 		// dY/dX_k = -1/X_k
 		const Shape &input_shape = x[0]->GetShape();
-		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
+		int size = input_shape.GetSizeRange(0, input_shape.GetRank() - 2);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		const float *x_data = x[0]->GetData();
 		const float *dEdY_data = dEdY->GetData();
 		float *dEdX_data = dEdX[0]->GetData();
@@ -1693,7 +1693,7 @@ struct CrossEntropyNodeFactory<Dummy, CPU> {
 
 Expression CrossEntropy(const Expression &x, int size, const int *labels) {
 	Shape shape = x.GetShape();
-	shape.SetDim(shape.GetDimCount() - 1, 1);
+	shape.SetDim(shape.GetRank() - 1, 1);
 	Graph *graph = x.GetGraph();
 	std::vector<int> l;
 	for (int i = 0; i < size; i++)
@@ -1708,9 +1708,9 @@ public:
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		// y = -log(x_k)
 		const Shape &input_shape = x[0]->GetShape();
-		int size = input_shape.GetSizeRange(0, input_shape.GetDimCount() - 2);
+		int size = input_shape.GetSizeRange(0, input_shape.GetRank() - 2);
 		size *= x[0]->GetBatchSize();
-		int dim_size = input_shape.GetDim(input_shape.GetDimCount() - 1);
+		int dim_size = input_shape.GetDim(input_shape.GetRank() - 1);
 		// Cross entropy loss
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
@@ -1746,7 +1746,7 @@ struct ClassificationAccuracyNodeFactory<Dummy, CPU> {
 
 Expression ClassificationAccuracy(const Expression &x, int size, const int *labels) {
 	Shape shape = x.GetShape();
-	shape.SetDim(shape.GetDimCount() - 1, 1);
+	shape.SetDim(shape.GetRank() - 1, 1);
 	Graph *graph = x.GetGraph();
 	std::vector<int> l;
 	for (int i = 0; i < size; i++)

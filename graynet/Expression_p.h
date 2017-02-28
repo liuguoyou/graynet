@@ -49,7 +49,7 @@ static void AllocateClearTensor(Graph *graph, Tensor *tensor) {
 static void GetTensorStrides(const Tensor *tensor, int strides[kMaxTensorDim + 1]) {
 	int batch_size = tensor->GetBatchSize();
 	const Shape &shape = tensor->GetShape();
-	int ndims = 1 + shape.GetDimCount();
+	int ndims = 1 + shape.GetRank();
 	int cur = 1;
 	for (int i = ndims - 1; i >= 1; i--) {
 		if (shape.GetDim(i - 1) == 1)
@@ -65,7 +65,7 @@ static void GetTensorStrides(const Tensor *tensor, int strides[kMaxTensorDim + 1
 static void GetTensorDims(const Tensor *tensor, int dims[kMaxTensorDim + 1]) {
 	dims[0] = tensor->GetBatchSize();
 	const Shape &shape = tensor->GetShape();
-	for (int i = 0; i < shape.GetDimCount(); i++)
+	for (int i = 0; i < shape.GetRank(); i++)
 		dims[i + 1] = shape.GetDim(i);
 }
 

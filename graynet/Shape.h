@@ -25,7 +25,7 @@ public:
 			size *= dims_[i];
 		return size;
 	}
-	inline int GetDimCount() const { return ndim_; }
+	inline int GetRank() const { return ndim_; }
 	inline int GetDim(int dim) const { return dims_[dim]; }
 
 	inline bool operator==(const Shape &rhs) const {
@@ -68,7 +68,7 @@ public:
 	}
 
 	void PushDims(const Shape &dims) {
-		for (int i = 0; i < dims.GetDimCount(); i++)
+		for (int i = 0; i < dims.GetRank(); i++)
 			PushDim(dims.GetDim(i));
 	}
 
