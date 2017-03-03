@@ -170,11 +170,14 @@ DEFINE_FUNCTOR(SoftMarginBackward, void, float lhs, float rhs, float y, float *d
 	*dYdR = -lhs / (1 + exp(lhs * rhs));
 }
 
-DEFINE_FUNCTOR(BinaryCrossEntropyForward, float, float lhs, float rhs) { return -rhs * log(lhs) - (1 - rhs) * log(1 - lhs); }
+// TODO: eps should be lower if using double
+#define BCEEps	1e-7f
+DEFINE_FUNCTOR(BinaryCrossEntropyForward, float, float lhs, float rhs) { return -rhs * log(lhs + BCEEps) - (1 - rhs) * log(1 - lhs + BCEEps); }
 DEFINE_FUNCTOR(BinaryCrossEntropyBackward, void, float lhs, float rhs, float y, float *dYdL, float *dYdR) {
-	*dYdL = (lhs - rhs) / (lhs - lhs * lhs);
-	*dYdR = log(1 - lhs) - log(lhs);
+	*dYdL = (lhs - rhs) / ((lhs + BCEEps) * (1.f - lhs + BCEEps));
+	*dYdR = log(1.f - lhs + BCEEps) - log(lhs + BCEEps);
 }
+#undef BCEEps
 
 DEFINE_FUNCTOR(BinaryClassificationAccuracyForward, float, float lhs, float rhs) { return (lhs > 0.5f) == (rhs > 0.5f); }
 
