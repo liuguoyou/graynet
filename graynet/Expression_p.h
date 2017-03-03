@@ -240,8 +240,8 @@ DEFINE_FUNCTOR(AcoshBackward, void, float x, float y, float *dYdX) { *dYdX = 1.f
 DEFINE_FUNCTOR(AtanhForward, float, float x) { return atanh(x); }
 DEFINE_FUNCTOR(AtanhBackward, void, float x, float y, float *dYdX) { *dYdX = 1.f / (1.f - x * x); }
 
-DEFINE_FUNCTOR(SigmoidForward, float, float x) { return 1 / (1 + exp(x)); }
-DEFINE_FUNCTOR(SigmoidBackward, void, float x, float y, float *dYdX) { *dYdX = -y * y * exp(x); }
+DEFINE_FUNCTOR(SigmoidForward, float, float x) { return 1 / (1 + exp(-x)); }
+DEFINE_FUNCTOR(SigmoidBackward, void, float x, float y, float *dYdX) { *dYdX = y * (1.f - y); }
 
 DEFINE_FUNCTOR(ReLUForward, float, float x) { return fmax(0.f, x); }
 DEFINE_FUNCTOR(ReLUBackward, void, float x, float y, float *dYdX) { *dYdX = (x > 0.f) ? 1.f : 0.f; }
