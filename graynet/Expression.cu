@@ -168,8 +168,16 @@ class LookupNodeGPU : public Node {
 public:
 	LookupNodeGPU(Graph *graph, int embeddings, int batch_size, const Shape &shape, const int *indices)
 		: Node{ embeddings }, batch_size_(batch_size), shape_(shape) {
-		int size = batch_size * shape.GetSize();
-		indices_ = (const int*)PinMemory(graph->GetDevice(), indices, size * sizeof(int));
+		int size = batch_size * shape.GetSize() * sizeof(int);
+		indices_pinned_ = (int*)graph->GetDevice()->AllocateMemoryPinned(size);
+		memcpy(indices_pinned_, indices, size);
+		indices_ = (int *)graph->GetDevice()->AllocateMemory(size);
+		CUDA_CALL(cudaMemcpyAsync(indices_, indices_pinned_, size, cudaMemcpyHostToDevice));
+	}
+
+	virtual void FreeMemory(Device *device) {
+		device->FreeMemoryPinned(indices_pinned_);
+		device->FreeMemory(indices_);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -200,7 +208,7 @@ public:
 private:
 	int batch_size_;
 	Shape shape_;
-	const int *indices_;
+	int *indices_pinned_, *indices_;
 };
 
 template<typename Dummy>
@@ -823,11 +831,15 @@ class DropoutNodeGPU : public Node {
 public:
 	DropoutNodeGPU(int node, float p) : Node{ node }, p_(p) {}
 
+	virtual void FreeMemory(Device *device) {
+		device->FreeMemory(probs_);
+	}
+
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
 		int size = x[0]->GetBatchSize() * x[0]->GetShape().GetSize();
-		probs_ = (float *)graph->GetDevice()->AllocateMemory(size * sizeof(float), Device::ScratchMemoryPool);
+		probs_ = (float *)graph->GetDevice()->AllocateMemory(size * sizeof(float));
 
 		curandGenerator_t generator = graph->GetDevice()->GetCuRANDGenerator();
 		CURAND_CALL(curandGenerateUniform(generator, probs_, size));
@@ -941,10 +953,15 @@ class CrossEntropyNodeGPU : public Node {
 public:
 	CrossEntropyNodeGPU(Graph *graph, int node, const std::vector<int> &labels) : Node{ node } {
 		int size = (int)labels.size() * sizeof(int);
-		int *labels_pinned = (int*)graph->GetDevice()->AllocateMemory(size, Device::PinnedScratchMemoryPool);
-		memcpy(labels_pinned, labels.data(), size);
-		labels_data_ = (int *)graph->GetDevice()->AllocateMemory(size, Device::ScratchMemoryPool);
-		CUDA_CALL(cudaMemcpyAsync(labels_data_, labels_pinned, size, cudaMemcpyHostToDevice));
+		labels_pinned_ = (int*)graph->GetDevice()->AllocateMemoryPinned(size);
+		memcpy(labels_pinned_, labels.data(), size);
+		labels_data_ = (int *)graph->GetDevice()->AllocateMemory(size);
+		CUDA_CALL(cudaMemcpyAsync(labels_data_, labels_pinned_, size, cudaMemcpyHostToDevice));
+	}
+
+	virtual void FreeMemory(Device *device) override {
+		device->FreeMemoryPinned(labels_pinned_);
+		device->FreeMemory(labels_data_);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -979,7 +996,7 @@ public:
 	}
 
 private:
-	int *labels_data_;
+	int *labels_pinned_, *labels_data_;
 };
 
 template<typename Dummy>
@@ -1015,10 +1032,15 @@ class ClassificationAccuracyNodeGPU : public Node {
 public:
 	ClassificationAccuracyNodeGPU(Graph *graph, int node, const std::vector<int> &labels) : Node{ node } {
 		int size = (int)labels.size() * sizeof(int);
-		int *labels_pinned = (int*)graph->GetDevice()->AllocateMemory(size, Device::PinnedScratchMemoryPool);
-		memcpy(labels_pinned, labels.data(), size);
-		labels_data_ = (int *)graph->GetDevice()->AllocateMemory(size, Device::ScratchMemoryPool);
-		CUDA_CALL(cudaMemcpyAsync(labels_data_, labels_pinned, size, cudaMemcpyHostToDevice));
+		labels_pinned_ = (int*)graph->GetDevice()->AllocateMemoryPinned(size);
+		memcpy(labels_pinned_, labels.data(), size);
+		labels_data_ = (int *)graph->GetDevice()->AllocateMemory(size);
+		CUDA_CALL(cudaMemcpyAsync(labels_data_, labels_pinned_, size, cudaMemcpyHostToDevice));
+	}
+
+	virtual void FreeMemory(Device *device) override {
+		device->FreeMemoryPinned(labels_pinned_);
+		device->FreeMemory(labels_data_);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -1042,7 +1064,7 @@ public:
 	}
 
 private:
-	int *labels_data_;
+	int *labels_pinned_, *labels_data_;
 };
 
 template<typename Dummy>

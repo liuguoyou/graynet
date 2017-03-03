@@ -25,6 +25,9 @@ public:
 	/*! Get flags for the node. Returns NoFlag by default. */
 	virtual int GetFlags() const;
 
+	/*! Free any associated memory */
+	virtual void FreeMemory(Device *device);
+
 	/*! Do forward computation */
 	virtual void Forward(Graph *grpah, const std::vector<const Tensor *> &x, Tensor *y) const = 0;
 

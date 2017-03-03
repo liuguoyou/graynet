@@ -36,19 +36,17 @@ public:
 #endif
 
 	/*! \private */
-	enum MemoryPoolType {
-		PermanentMemoryPool,
-		ScratchMemoryPool,
-		PinnedScratchMemoryPool,
-	};
+	void *AllocateMemory(size_t size);
 	/*! \private */
-	void *AllocateMemory(int size, MemoryPoolType memory_pool);
+	void FreeMemory(void *ptr);
 	/*! \private */
-	void ZeroMemory(void *ptr, int size);
+	void *AllocateMemoryPinned(size_t size);
 	/*! \private */
-	void CopyMemory(void *dst, const void *src, int size);
+	void FreeMemoryPinned(void *ptr);
 	/*! \private */
-	void ClearMemoryPool(MemoryPoolType memory_pool);
+	void ZeroMemory(void *ptr, size_t size);
+	/*! \private */
+	void CopyMemory(void *dst, const void *src, size_t size);
 
 private:
 	DevicePrivate *d;

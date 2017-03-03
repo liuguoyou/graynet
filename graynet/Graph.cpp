@@ -20,6 +20,19 @@
 
 static const int kMaxScopeNameLength = 255;
 
+static void FreeTensorMemory(Graph *graph, const Tensor &tensor) {
+	if (tensor.IsEmpty())
+		return;
+	Device *device = graph->GetDevice();
+	if (tensor.IsSparse()) {
+		device->FreeMemory(tensor.GetSparseData());
+		device->FreeMemory(tensor.GetSparseRowIndices());
+		device->FreeMemory(tensor.GetSparseColumnIndices());
+	}
+	else
+		device->FreeMemory(tensor.GetData());
+}
+
 /*! @private */
 class GraphPrivate {
 public:
@@ -70,6 +83,13 @@ Graph::Graph(Device *device) : d(new GraphPrivate()) {
 }
 
 Graph::~Graph() {
+	// Free scratch memory
+	Clear();
+	// Free parameter memory
+	for (size_t i = 0; i < d->parameters_.size(); i++) {
+		FreeTensorMemory(this, d->parameters_[i]);
+		FreeTensorMemory(this, d->parameter_gradients_[i]);
+	}
 	delete d;
 }
 
@@ -124,7 +144,7 @@ Expression Graph::AddParameter(const Shape &shape, InitMethod init_method) {
 
 Expression Graph::AddParameter(const Shape &shape, const float *initial_values) {
 	int size = shape.GetSize();
-	float *parameter_data = (float *)d->device_->AllocateMemory(size * sizeof(float), Device::PermanentMemoryPool);
+	float *parameter_data = (float *)d->device_->AllocateMemory(size * sizeof(float));
 #ifdef USE_CUDA
 	if (GetDeviceType() == GPU)
 		CUDA_CALL(cudaMemcpy(parameter_data, initial_values, size * sizeof(float), cudaMemcpyHostToDevice));
@@ -132,7 +152,7 @@ Expression Graph::AddParameter(const Shape &shape, const float *initial_values) 
 #endif
 		memcpy(parameter_data, initial_values, size * sizeof(float));
 	d->parameters_.push_back(Tensor(GetDeviceType(), shape, parameter_data));
-	float *parameter_gradient_data = (float *)d->device_->AllocateMemory(size * sizeof(float), Device::PermanentMemoryPool);
+	float *parameter_gradient_data = (float *)d->device_->AllocateMemory(size * sizeof(float));
 	d->device_->ZeroMemory(parameter_gradient_data, size * sizeof(float));
 	d->parameter_gradients_.push_back(Tensor(GetDeviceType(), shape, parameter_gradient_data));
 	// We use negative indices to represent parameters
@@ -196,16 +216,16 @@ void Graph::PopScope() {
 }
 
 void Graph::Clear() {
-	// Clear scratch nodes
-	for (Node *node : d->nodes_)
-		delete node;
+	// Clear scratch nodes and associated memory
+	for (size_t i = 0; i < d->nodes_.size(); i++) {
+		d->nodes_[i]->FreeMemory(GetDevice());
+		FreeTensorMemory(this, d->outputs_[i]);
+		FreeTensorMemory(this, d->gradients_[i]);
+		delete d->nodes_[i];
+	}
 	d->nodes_.clear();
 	d->outputs_.clear();
 	d->gradients_.clear();
-	d->device_->ClearMemoryPool(Device::ScratchMemoryPool);
-#ifdef USE_CUDA
-	d->device_->ClearMemoryPool(Device::PinnedScratchMemoryPool);
-#endif
 }
 
 void Graph::ClearParameterGradients() {
@@ -217,14 +237,11 @@ void Graph::ClearForwardCache() {
 	for (int i = 0; i < (int)d->nodes_.size(); i++) {
 		int batch_size = d->outputs_[i].GetBatchSize();
 		Shape shape = d->outputs_[i].GetShape();
+		FreeTensorMemory(this, d->outputs_[i]);
+		FreeTensorMemory(this, d->gradients_[i]);
 		d->outputs_[i] = Tensor(GetDeviceType(), batch_size, shape, nullptr);
 		d->gradients_[i] = Tensor(GetDeviceType(), batch_size, shape, nullptr);
 	}
-	// Input nodes also use scratch tensors so we cannot clean up memory cleanly.
-	// As for now this function is only called from CheckGradient() so leaking a bit of
-	// memory is not a big issue here.
-	d->device_->ClearMemoryPool(Device::ScratchMemoryPool);
-	//d->device_->ClearMemoryPool(Device::PinnedScratchMemoryPool);
 }
 
 bool Graph::CheckGradient(const Expression &loss, bool verbose) {
@@ -314,7 +331,7 @@ Tensor Graph::Forward(const Expression &expression) {
 				int batch_size = d->outputs_[i].GetBatchSize();
 				Shape shape = d->outputs_[i].GetShape();
 				int size = batch_size * shape.GetSize() * sizeof(float);
-				float *output_data = (float*)d->device_->AllocateMemory(size, Device::ScratchMemoryPool);
+				float *output_data = (float*)d->device_->AllocateMemory(size);
 				d->outputs_[i] = Tensor(GetDeviceType(), batch_size, shape, output_data);
 			}
 			d->nodes_[i]->Forward(this, x, &d->outputs_[i]);
@@ -336,7 +353,13 @@ void Graph::Backward(const Expression &expression) {
 		REPORT_ERROR("Expression is not a scalar for backward propagation.");
 	int batch_size = d->outputs_[node_id].GetBatchSize();
 	// Set dE/dE = 1
-	float *dEdE_data = (float*)d->device_->AllocateMemory(batch_size * sizeof(float), Device::ScratchMemoryPool);
+	float *dEdE_data;
+	if (d->gradients_[node_id].IsEmpty()) {
+		dEdE_data = (float*)d->device_->AllocateMemory(batch_size * sizeof(float));
+		d->gradients_[node_id] = Tensor(GetDeviceType(), batch_size, shape, dEdE_data);
+	}
+	else
+		dEdE_data = d->gradients_[node_id].GetData();
 #ifdef USE_CUDA
 	if (d->device_->GetDeviceType() == GPU) {
 		float value = 1.f;
@@ -352,7 +375,6 @@ void Graph::Backward(const Expression &expression) {
 		for (int i = 0; i < batch_size; i++)
 			dEdE_data[i] = 1.f;
 	}
-	d->gradients_[node_id] = Tensor(GetDeviceType(), batch_size, shape, dEdE_data);
 	// Back propagation
 	// First do a depth first traversal, to determine degree for each node,
 	// to omit unnecessary edges for calculating the loss.
@@ -375,7 +397,7 @@ void Graph::Backward(const Expression &expression) {
 						int size = batch_size * shape.GetSize() * sizeof(float);
 						float *data = d->gradients_[arg_id].GetData();
 						if (data == nullptr) {
-							data = (float *)d->device_->AllocateMemory(size, Device::ScratchMemoryPool);
+							data = (float *)d->device_->AllocateMemory(size);
 							d->gradients_[arg_id] = Tensor(GetDeviceType(), batch_size, shape, data);
 						}
 						d->device_->ZeroMemory(data, size);

@@ -77,6 +77,10 @@ public:
 		data_ = (float *)PinMemory(graph->GetDevice(), data, size);
 	}
 
+	virtual void FreeMemory(Device *device) override {
+		device->FreeMemoryPinned(data_);
+	}
+
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		float *y_data = y->GetData();
 		int size = batch_size_ * shape_.GetSize() * sizeof(float);
@@ -118,11 +122,17 @@ public:
 		return NoAllocateForwardOutput;
 	}
 
+	virtual void FreeMemory(Device *device) override {
+		device->FreeMemoryPinned(sparse_data_);
+		device->FreeMemoryPinned(batch_indices_);
+		device->FreeMemoryPinned(indices_);
+	}
+
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		Device *device = graph->GetDevice();
-		float *sparse_data = (float*)device->AllocateMemory(nonzero_count_ * sizeof(float), Device::ScratchMemoryPool);
-		int *batch_indices = (int*)device->AllocateMemory((batch_size_ + 1) * sizeof(int), Device::ScratchMemoryPool);
-		int *indices = (int*)device->AllocateMemory(nonzero_count_ * sizeof(int), Device::ScratchMemoryPool);
+		float *sparse_data = (float*)device->AllocateMemory(nonzero_count_ * sizeof(float));
+		int *batch_indices = (int*)device->AllocateMemory((batch_size_ + 1) * sizeof(int));
+		int *indices = (int*)device->AllocateMemory(nonzero_count_ * sizeof(int));
 		CopyMemoryHostToDeviceAsync(device, sparse_data, sparse_data_, nonzero_count_ * sizeof(float));
 		CopyMemoryHostToDeviceAsync(device, batch_indices, batch_indices_, (batch_size_ + 1) * sizeof(int));
 		CopyMemoryHostToDeviceAsync(device, indices, indices_, nonzero_count_ * sizeof(int));
@@ -154,7 +164,11 @@ public:
 	LookupNodeCPU(Graph *graph, int embeddings, int batch_size, const Shape &shape, const int *indices)
 		: Node{ embeddings }, batch_size_(batch_size), shape_(shape) {
 		int size = batch_size * shape.GetSize();
-		indices_ = (const int*)PinMemory(graph->GetDevice(), indices, size * sizeof(int));
+		indices_ = (int*)PinMemory(graph->GetDevice(), indices, size * sizeof(int));
+	}
+
+	virtual void FreeMemory(Device *device) override {
+		device->FreeMemoryPinned(indices_);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -185,7 +199,7 @@ public:
 private:
 	int batch_size_;
 	Shape shape_;
-	const int *indices_;
+	int *indices_;
 };
 
 template<typename Dummy>
@@ -1374,8 +1388,9 @@ public:
 	ReshapeNode(int node, const Shape &shape) : Node{ node }, shape_(shape) {}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
-		float *x_data = (float*)x[0]->GetData();
-		*y = Tensor(graph->GetDeviceType(), x[0]->GetBatchSize(), shape_, x_data);
+		int size = y->GetBatchSize() * y->GetShape().GetSize() * sizeof(float);
+		// TODO: Cannot use a view because it will cause double free in Graph::Clear().
+		graph->GetDevice()->CopyMemory(y->GetData(), x[0]->GetData(), size);
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
@@ -1520,6 +1535,10 @@ class DropoutNodeCPU : public Node {
 public:
 	DropoutNodeCPU(int node, float p) : Node{ node }, p_(p) {}
 
+	virtual void FreeMemory(Device *device) override {
+		device->FreeMemory(scales_);
+	}
+
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		std::mt19937 gen(graph->GetIncrementRandomSeed());
 		std::uniform_real_distribution<float> dist{ 0.f, 1.f };
@@ -1527,7 +1546,7 @@ public:
 		const float *x_data = x[0]->GetData();
 		float *y_data = y->GetData();
 		int size = x[0]->GetBatchSize() * x[0]->GetShape().GetSize();
-		scales_ = (float *)graph->GetDevice()->AllocateMemory(size * sizeof(float), Device::ScratchMemoryPool);
+		scales_ = (float *)graph->GetDevice()->AllocateMemory(size * sizeof(float));
 		float scale = 1.f / (1.f - p_);
 		for (int i = 0; i < size; i++) {
 			if (dist(gen) <= p_)

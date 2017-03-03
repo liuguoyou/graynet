@@ -97,6 +97,8 @@ Optimizer::Optimizer(Graph *graph) : d(new OptimizerPrivate()) {
 }
 
 Optimizer::~Optimizer() {
+	for (const Tensor &extra : d->extras_)
+		d->graph_->GetDevice()->FreeMemory(extra.GetData());
 	delete d;
 }
 
@@ -122,7 +124,7 @@ void Optimizer::UpdateCallback(const std::vector<Tensor> &parameters,
 			int size = extras_count * batch_size * shape.GetSize() * sizeof(float);
 			Device *device = d->graph_->GetDevice();
 
-			float *data = (float *)device->AllocateMemory(size, Device::PermanentMemoryPool);
+			float *data = (float *)device->AllocateMemory(size);
 			device->ZeroMemory(data, size);
 			d->extras_.emplace_back(device->GetDeviceType(), batch_size, shape, data);
 		}

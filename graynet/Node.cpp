@@ -6,6 +6,9 @@
 Node::~Node() {
 }
 
+void Node::FreeMemory(Device *device) {
+}
+
 int Node::GetFlags() const {
 	return 0;
 }

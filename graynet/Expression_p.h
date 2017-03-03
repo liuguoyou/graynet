@@ -14,19 +14,19 @@
 
 /*! \cond NOSHOW */
 
-static void *PinMemory(Device *device, const void *data, int size) {
+static void *PinMemory(Device *device, const void *data, size_t size) {
 	void *ret;
 #ifdef USE_CUDA
 	if (device->GetDeviceType() == GPU)
-		ret = (float*)device->AllocateMemory(size, Device::PinnedScratchMemoryPool);
+		ret = (float*)device->AllocateMemoryPinned(size);
 	else
 #endif
-		ret = (float*)device->AllocateMemory(size, Device::ScratchMemoryPool);
+		ret = (float*)device->AllocateMemory(size);
 	memcpy(ret, data, size);
 	return ret;
 }
 
-static void CopyMemoryHostToDeviceAsync(Device *device, void *dst, const void *src, int size) {
+static void CopyMemoryHostToDeviceAsync(Device *device, void *dst, const void *src, size_t size) {
 #ifdef USE_CUDA
 	if (device->GetDeviceType() == GPU)
 		CUDA_CALL(cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice));
@@ -40,7 +40,7 @@ static void AllocateClearTensor(Graph *graph, Tensor *tensor) {
 		int batch_size = tensor->GetBatchSize();
 		Shape shape = tensor->GetShape();
 		int size = batch_size * shape.GetSize() * sizeof(float);
-		float *data = (float*)graph->GetDevice()->AllocateMemory(size, Device::ScratchMemoryPool);
+		float *data = (float*)graph->GetDevice()->AllocateMemory(size);
 		graph->GetDevice()->ZeroMemory(data, size);
 		*tensor = Tensor(graph->GetDeviceType(), batch_size, shape, data);
 	}
