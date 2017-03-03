@@ -286,6 +286,7 @@ Device::~Device() {
 	if (d->device_type_ == GPU) {
 		CUBLAS_CALL(cublasDestroy_v2(d->cublas_handle_));
 		CUDNN_CALL(cudnnDestroy(d->cudnn_handle_));
+		CURAND_CALL(curandDestroyGenerator(d->curand_generator_));
 	}
 #endif
 	delete d;
