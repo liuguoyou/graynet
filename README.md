@@ -59,4 +59,4 @@ The documentation of GrayNet can be retrieved at http://graynet.rtfd.io.
 Code examples are located at the [examples](https://github.com/wishstudio/graynet/tree/master/examples) directory in the repo.
 
 # License
-GrayNet uses the New BSD (3-clause) License. See [LICENSE](https://github.com/wishstudio/graynet/blob/master/LICENSE) for details.
+GrayNet is licensed under the New BSD (3-clause) License. See [LICENSE](https://github.com/wishstudio/graynet/blob/master/LICENSE) for details.
