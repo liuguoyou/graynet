@@ -1531,6 +1531,85 @@ Expression Slice(const Expression &x, const Shape &start, const Shape &size) {
 	return CreateDeviceSpecificNode<SliceNodeFactory>(x.GetGraph(), size, x.GetNodeIndex(), start, size);
 }
 
+class ConcatNodeCPU : public Node {
+public:
+	ConcatNodeCPU(std::initializer_list<Expression> values, int axis) : Node(values), axis_(axis) {}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		const Shape &y_shape = y->GetShape();
+		float *y_data = y->GetData();
+		int axis_stride = y_shape.GetSizeRange(axis_ + 1, y_shape.GetRank());
+		int axis_total = y_shape.GetDim(axis_);
+		int higher_stride = axis_stride * axis_total;
+		int higher_size = y_shape.GetSizeRange(0, axis_);
+		int base = 0;
+		for (size_t i = 0; i < x.size(); i++) {
+			int cur_axis_total = x[i]->GetShape().GetDim(axis_);
+			int cur_axis_size = axis_stride * cur_axis_total;
+			const float *x_data = x[i]->GetData();
+			for (int h = 0; h < higher_size; h++)
+				for (int l = 0; l < cur_axis_size; l++) {
+					int index = base + h * higher_stride + l;
+					y_data[index] = *x_data++;
+				}
+			base += cur_axis_total * axis_stride;
+		}
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		const Shape &y_shape = y->GetShape();
+		const float *dEdY_data = dEdY->GetData();
+		int axis_stride = y_shape.GetSizeRange(axis_ + 1, y_shape.GetRank());
+		int axis_total = y_shape.GetDim(axis_);
+		int higher_stride = axis_stride * axis_total;
+		int higher_size = y_shape.GetSizeRange(0, axis_);
+		int base = 0;
+		for (size_t i = 0; i < x.size(); i++) {
+			int cur_axis_total = x[i]->GetShape().GetDim(axis_);
+			int cur_axis_size = axis_stride * cur_axis_total;
+			float *dEdX_data = dEdX[i]->GetData();
+			for (int h = 0; h < higher_size; h++)
+				for (int l = 0; l < cur_axis_size; l++) {
+					int index = base + h * higher_stride + l;
+					*dEdX_data++ += dEdY_data[index];
+				}
+			base += cur_axis_total * axis_stride;
+		}
+	}
+
+private:
+	int axis_;
+};
+
+template<typename Dummy>
+struct ConcatNodeFactory<Dummy, CPU> {
+	Node *Create(std::initializer_list<Expression> values, int axis) {
+		return new ConcatNodeCPU(values, axis);
+	}
+};
+
+Expression Concat(std::initializer_list<Expression> values, int axis) {
+	if (values.size() == 0 || values.size() == 1)
+		REPORT_ERROR("Must have at least two values for concatenation.");
+	Graph *graph = values.begin()->GetGraph();
+	Shape output_shape = values.begin()->GetShape();
+	int sum = 0;
+	for (const Expression &value : values) {
+		if (value.GetBatchSize() != 1)
+			REPORT_ERROR("Concat does not support batch input.");
+		const Shape &shape = value.GetShape();
+		if (shape.GetRank() != output_shape.GetRank())
+			REPORT_ERROR("Concatenation tensor rank mismatch.");
+		for (int i = 0; i < shape.GetRank(); i++)
+			if (i != axis && shape.GetDim(i) != output_shape.GetDim(i))
+				REPORT_ERROR("Dimension excluding concatenating axis mismatch.");
+		sum += shape.GetDim(axis);
+	}
+	output_shape.SetDim(axis, sum);
+	return CreateDeviceSpecificNode<ConcatNodeFactory>(graph, output_shape, values, axis);
+}
+
 class DropoutNodeCPU : public Node {
 public:
 	DropoutNodeCPU(int node, float p) : Node{ node }, p_(p) {}

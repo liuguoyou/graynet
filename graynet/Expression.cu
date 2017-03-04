@@ -807,6 +807,32 @@ struct SliceNodeFactory<Dummy, GPU> {
 
 template struct SliceNodeFactory<void, GPU>;
 
+class ConcatNodeGPU : public Node {
+public:
+	ConcatNodeGPU(std::initializer_list<Expression> values, int axis) : Node(values), axis_(axis) {}
+
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
+		REPORT_ERROR("Concat() is unsupported on GPU.");
+	}
+
+	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
+		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
+		REPORT_ERROR("Concat() is unsupported on GPU.");
+	}
+
+private:
+	int axis_;
+};
+
+template<typename Dummy>
+struct ConcatNodeFactory<Dummy, GPU> {
+	Node *Create(std::initializer_list<Expression> values, int axis) {
+		return new ConcatNodeGPU(values, axis);
+	}
+};
+
+template struct ConcatNodeFactory<void, GPU>;
+
 static __global__ void DropoutForwardKernel(int n, float p, float mul_scale,
 	const float *probs, const float *x, float *y) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;

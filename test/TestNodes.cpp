@@ -4,7 +4,7 @@
 
 class NodeTest: public testing::Test {
 public:
-	NodeTest() : device(GPU), graph(&device) {
+	NodeTest() : device(CPU), graph(&device) {
 	}
 
 	void CheckGradient(const Expression &loss) {
@@ -364,6 +364,71 @@ TEST_F(NodeTest, Slice2D) {
 	CheckValue(x, expected);
 	x = ReduceSum(x);
 	CheckGradient(x);
+}
+
+TEST_F(NodeTest, ConcatSimple) {
+	const float x_data[] = {
+		0.1f, 0.2f, 0.3f,
+		0.4f, 0.5f, 0.6f,
+	};
+	const float y_data[] = {
+		-0.1f, -0.2f, -0.3f,
+		-0.4f, -0.5f, -0.6f,
+	};
+	Expression x = graph.AddParameter(Shape(2, 3), x_data);
+	Expression y = graph.AddParameter(Shape(2, 3), y_data);
+	Expression z1 = Concat({ x, y }, 0);
+	const float z1_expected[] = {
+		0.1f, 0.2f, 0.3f,
+		0.4f, 0.5f, 0.6f,
+		-0.1f, -0.2f, -0.3f,
+		-0.4f, -0.5f, -0.6f,
+	};
+	CheckValue(z1, z1_expected);
+	CheckGradient(ReduceSum(z1));
+	Expression z2 = Concat({ x, y }, 1);
+	const float z2_expected[] = {
+		0.1f, 0.2f, 0.3f, -0.1f, -0.2f, -0.3f,
+		0.4f, 0.5f, 0.6f, -0.4f, -0.5f, -0.6f,
+	};
+	CheckValue(z2, z2_expected);
+	CheckGradient(ReduceSum(z2));
+}
+
+TEST_F(NodeTest, Concat3) {
+	const float x_data[] = {
+		0.9f, -0.8f,
+		1.0f, 0.1f,
+	};
+	const float y_data[] = {
+		-0.2f, -0.5f,
+		0.3f, 0.7f,
+	};
+	const float z_data[] = {
+		-0.3f, -0.7f,
+		0.5f, 0.6f
+	};
+	Expression x = graph.AddParameter(Shape(2, 2), x_data);
+	Expression y = graph.AddParameter(Shape(2, 2), y_data);
+	Expression z = graph.AddParameter(Shape(2, 2), z_data);
+	Expression r1 = Concat({ x, y, z }, 0);
+	const float r1_expected[] = {
+		0.9f, -0.8f,
+		1.0f, 0.1f,
+		-0.2f, -0.5f,
+		0.3f, 0.7f,
+		-0.3f, -0.7f,
+		0.5f, 0.6f,
+	};
+	CheckValue(r1, r1_expected);
+	CheckGradient(ReduceSum(r1));
+	Expression r2 = Concat({ x, y, z }, 1);
+	const float r2_expected[] = {
+		0.9f, -0.8f, -0.2f, -0.5f, -0.3f, -0.7f,
+		1.0f, 0.1f, 0.3f, 0.7f, 0.5f, 0.6f,
+	};
+	CheckValue(r2, r2_expected);
+	CheckGradient(ReduceSum(r2));
 }
 
 TEST_F(NodeTest, ConvolutionSimple) {

@@ -2,6 +2,8 @@
 
 #include "Tensor.h"
 
+#include <initializer_list>
+
 /*! @file */
 
 class Graph;
@@ -321,6 +323,18 @@ Expression ReduceSum(const Expression &x);
  * \param size Extraction count for each dimension.
  */
 Expression Slice(const Expression &x, const Shape &start, const Shape &size);
+
+/*! Concatenate tensors along the specified axis.
+ *
+ * The two tensors must have the same rank, and all dimensions except the concatenating
+ * `axis` must be equal.
+ *
+ * Suppose `values[i].shape = [d0, d1, ..., daxis, ..., dn]`, the result shape will be:
+ * `[d0, d1, ..., Saxis, ..., dn]` where `Saxis = Sum(daxis[i])`.
+ *
+ * Currently only non batched inputs are supported.
+ */
+Expression Concat(std::initializer_list<Expression> values, int axis);
 
 /*! Dropout operation. This will randomly zero out \f$ p \f$ fraction of input elements.
  * The remaining values will be scaled by \f$ 1 / (1 - p) \f$.

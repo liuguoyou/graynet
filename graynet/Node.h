@@ -4,6 +4,7 @@
 
 #include <initializer_list>
 #include <vector>
+#include "Expression.h"
 #include "Graph.h"
 #include "Tensor.h"
 
@@ -17,7 +18,16 @@ public:
 	};
 
 	/*! Constructor */
+	Node() {}
+
+	/*! Constructor */
 	Node(std::initializer_list<int> args) : args_(args) {}
+
+	/*! Constructor */
+	Node(std::initializer_list<Expression> args) {
+		for (const Expression &expression : args)
+			args_.push_back(expression.GetNodeIndex());
+	}
 
 	/*! Destructor */
 	virtual ~Node();
@@ -29,7 +39,7 @@ public:
 	virtual void FreeMemory(Device *device);
 
 	/*! Do forward computation */
-	virtual void Forward(Graph *grpah, const std::vector<const Tensor *> &x, Tensor *y) const = 0;
+	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const = 0;
 
 	/*! Do backward computation */
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
