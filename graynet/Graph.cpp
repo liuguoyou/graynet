@@ -407,9 +407,9 @@ void Graph::Backward(const Expression &expression) {
 						}
 						d->device_->ZeroMemory(data, size);
 					}
+					stack.push(arg_id);
 				}
 				degrees[arg_id]++;
-				stack.push(arg_id);
 			}
 	}
 	// Temporary parameter storage for Backward() call
