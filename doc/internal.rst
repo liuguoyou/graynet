@@ -5,7 +5,6 @@ Graph Class:
 -----------------
 1. 4 bytes, "GRAY", file format header;
 2. 1 int32, version number;
-3. 1 int32, tensor data type, output sizeof(float) or sizeof(double);
 3. 1 int32, count, the number of paramaters;
 4. output `count` paramater names:
 	for each paramater name:
@@ -16,6 +15,7 @@ Graph Class:
 		A. 1 byte, represents it is sparse or not, 0 is dense, 1 is sparse;
 		B. Shape object:
 			a. 1 int32, ndim_, number of dimension;
-			b. `kMaxTensorDim` int32, store dims_ array.
-		C. data_ array. length is shape.GetSize(). tensor data may be float or double.
+			b. `ndim_` int32, store `dims_` array.
+		C. 1 int32, data type, 0 is float, 1 is double;
+		D. data_ array. length is shape.GetSize(). tensor data type may be float or double.
 
