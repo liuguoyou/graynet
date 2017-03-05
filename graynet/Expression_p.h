@@ -112,7 +112,7 @@ struct PoolingNodeFactory {
 
 template<typename Dummy, DeviceType DeviceType>
 struct ReduceSumNodeFactory {
-	Node *Create(int node);
+	Node *Create(int node, int axis);
 };
 
 template<typename Dummy, DeviceType DeviceType>

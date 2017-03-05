@@ -177,8 +177,13 @@ void Graph::DefineParameter(Expression *param, const char *name, const Shape &sh
 	AppendScopeName(name);
 	std::string str_name(d->scope_name_);
 	std::unordered_map<std::string, int>::const_iterator iter = d->parameter_names_.find(str_name);
-	if (iter != d->parameter_names_.end())
+	if (iter != d->parameter_names_.end()) {
 		*param = Expression(this, iter->second);
+		if (param->GetShape() != shape) {
+			REPORT_ERROR("Requested shape mismatch with registered parameter. "
+				"You are probably using the same name for different operations.");
+		}
+	}
 	else {
 		*param = AddParameter(shape, init_method);
 		d->parameter_names_.emplace(str_name, param->GetNodeIndex());

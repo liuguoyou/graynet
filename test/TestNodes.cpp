@@ -4,7 +4,7 @@
 
 class NodeTest: public testing::Test {
 public:
-	NodeTest() : device(CPU), graph(&device) {
+	NodeTest() : device(GPU), graph(&device) {
 	}
 
 	void CheckGradient(const Expression &loss) {
@@ -333,6 +333,27 @@ TEST_F(NodeTest, ReduceSumLarge) {
 	x = ReduceSum(x);
 	CheckValue(x, &sum);
 	CheckGradient(x);
+}
+
+TEST_F(NodeTest, ReduceSumAxis) {
+	const float x_data[] = {
+		0.1f, 0.2f, 0.3f,
+		0.4f, 0.5f, 0.6f,
+		0.7f, 0.8f, 0.9f,
+	};
+	Expression x = graph.AddParameter(Shape(3, 3), x_data);
+	Expression row = ReduceSum(x, 1);
+	const float expected_row[] = {
+		0.6f,
+		1.5f,
+		2.4f,
+	};
+	CheckValue(row, expected_row);
+	Expression column = ReduceSum(x, 0);
+	const float expected_column[] = {
+		1.2f, 1.5f, 1.8f,
+	};
+	CheckValue(column, expected_column);
 }
 
 TEST_F(NodeTest, Slice1D) {

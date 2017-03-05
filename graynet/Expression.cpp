@@ -1428,7 +1428,7 @@ Expression Flatten(const Expression &x) {
 
 class ReduceSumNodeCPU : public Node {
 public:
-	ReduceSumNodeCPU(int node) : Node{ node } {}
+	ReduceSumNodeCPU(int node, int axis) : Node{ node }, axis_(axis) {}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *x_data = (float*)x[0]->GetData();
@@ -1436,11 +1436,23 @@ public:
 		
 		int size = x[0]->GetShape().GetSize();
 		int batch_size = x[0]->GetBatchSize();
-		for (int batch_id = 0; batch_id < batch_size; batch_id++) {
-			float sum = 0;
-			for (int i = 0; i < size; i++)
-				sum += x_data[batch_id * size + i];
-			y_data[batch_id] = sum;
+		if (axis_ == -1) {
+			for (int batch_id = 0; batch_id < batch_size; batch_id++) {
+				float sum = 0;
+				for (int i = 0; i < size; i++)
+					sum += x_data[batch_id * size + i];
+				y_data[batch_id] = sum;
+			}
+		}
+		else {
+			int ndims = x[0]->GetShape().GetRank() + 1;
+			GetTensorDims(x[0], x_dims_);
+			GetTensorStrides(x[0], x_strides_);
+			GetTensorStrides(y, y_strides_);
+			auto transform_func = [&](int x_index, int y_index) {
+				y_data[y_index] += x_data[x_index];
+			};
+			Transform<2>(transform_func, ndims, x_dims_, { x_strides_, y_strides_ });
 		}
 	}
 
@@ -1450,22 +1462,43 @@ public:
 		float *dEdX_data = (float*)dEdX[0]->GetData();
 		int size = x[0]->GetShape().GetSize();
 		int batch_size = x[0]->GetBatchSize();
-		for (int batch_id = 0; batch_id < batch_size; batch_id++)
-			for (int i = 0; i < size; i++)
-				dEdX_data[batch_id * size + i] += dEdY_data[batch_id];
+		if (axis_ == -1) {
+			for (int batch_id = 0; batch_id < batch_size; batch_id++)
+				for (int i = 0; i < size; i++)
+					dEdX_data[batch_id * size + i] += dEdY_data[batch_id];
+		}
+		else {
+			int ndims = x[0]->GetShape().GetRank() + 1;
+			auto transform_func = [&](int x_index, int y_index) {
+				dEdX_data[x_index] += dEdY_data[y_index];
+			};
+			Transform<2>(transform_func, ndims, x_dims_, { x_strides_, y_strides_ });
+		}
 	}
+
+private:
+	int axis_;
+	mutable int x_dims_[kMaxTensorDim + 1];
+	mutable int x_strides_[kMaxTensorDim + 1], y_strides_[kMaxTensorDim + 1];
 };
 
 template<typename Dummy>
 struct ReduceSumNodeFactory<Dummy, CPU> {
-	Node *Create(int node) {
-		return new ReduceSumNodeCPU(node);
+	Node *Create(int node, int axis) {
+		return new ReduceSumNodeCPU(node, axis);
 	}
 };
 
-Expression ReduceSum(const Expression &x) {
+Expression ReduceSum(const Expression &x, int axis) {
 	Graph *graph = x.GetGraph();
-	return CreateDeviceSpecificNode<ReduceSumNodeFactory>(graph, Shape(1), x.GetNodeIndex());
+	Shape output_shape;
+	if (axis == -1)
+		output_shape = Shape(1);
+	else {
+		output_shape = x.GetShape();
+		output_shape.SetDim(axis, 1);
+	}
+	return CreateDeviceSpecificNode<ReduceSumNodeFactory>(graph, output_shape, x.GetNodeIndex(), axis);
 }
 
 class SliceNodeCPU : public Node {
