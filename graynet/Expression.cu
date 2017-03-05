@@ -1084,15 +1084,13 @@ class ClassificationAccuracyNodeGPU : public Node {
 public:
 	ClassificationAccuracyNodeGPU(Graph *graph, int node, const std::vector<int> &labels) : Node{ node } {
 		int size = (int)labels.size() * sizeof(int);
+		// We use CUDA's automatic data migration feature since we only need the labels once
 		labels_pinned_ = (int*)graph->GetDevice()->AllocateMemoryPinned(size);
 		memcpy(labels_pinned_, labels.data(), size);
-		labels_data_ = (int *)graph->GetDevice()->AllocateMemory(size);
-		CUDA_CALL(cudaMemcpyAsync(labels_data_, labels_pinned_, size, cudaMemcpyHostToDevice));
 	}
 
 	virtual void FreeMemory(Device *device) override {
 		device->FreeMemoryPinned(labels_pinned_);
-		device->FreeMemory(labels_data_);
 	}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
@@ -1106,7 +1104,7 @@ public:
 		int threadsPerBlock = kThreadsPerBlock;
 		int blocksPerGrid = (size + threadsPerBlock - 1) / threadsPerBlock;
 		ClassificationAccuracyKernel<<<blocksPerGrid, threadsPerBlock>>>(
-			x_data, labels_data_, y_data, size, dim_size);
+			x_data, labels_pinned_, y_data, size, dim_size);
 		CUDA_CALL(cudaGetLastError());
 	}
 
@@ -1116,7 +1114,7 @@ public:
 	}
 
 private:
-	int *labels_pinned_, *labels_data_;
+	int *labels_pinned_;
 };
 
 template<typename Dummy>
