@@ -314,8 +314,14 @@ Expression Reshape(const Expression &x, const Shape &shape);
 /*! Flatten a multi-dimensional tensor to 1-D. This is equivalent to `Reshape(x, Shape(x.GetShape().GetSize()))`. */
 Expression Flatten(const Expression &x);
 
-/*! Reduce one dimension */
-Expression ReduceSum(const Expression &x);
+/*! Compute sum of elements across specified dimensions of a tensor.
+ * Currently only reduction of one dimension, or the entire tensor is supported.
+ *
+ * If `axis` is -1 (default), the entire tensor is reduced to a scalar.
+ *
+ * Otherwise, only the specified dimension is reduced.
+ */
+Expression ReduceSum(const Expression &x, int axis = -1);
 
 /*! Return a sub-tensor of the input tensor. The two parameters `start` and `size`
  * specifies the slicing dimensions.

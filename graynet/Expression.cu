@@ -675,6 +675,10 @@ struct PoolingNodeFactory<Dummy, GPU> {
 
 template struct PoolingNodeFactory<void, GPU>;
 
+struct ReduceSumDesc {
+	int x_strides[kMaxTensorDim + 1], y_strides[kMaxTensorDim + 1];
+};
+
 struct Empty {};
 
 static __global__ void ReduceSumBackwardKernel(int nelems, int size,
@@ -687,7 +691,7 @@ static __global__ void ReduceSumBackwardKernel(int nelems, int size,
 
 class ReduceSumNodeGPU : public Node {
 public:
-	ReduceSumNodeGPU(int node) : Node{ node } {}
+	ReduceSumNodeGPU(int node, int axis) : Node{ node }, axis_(axis) {}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const float *x_data = (float*)x[0]->GetData();
@@ -695,23 +699,39 @@ public:
 
 		int size = x[0]->GetShape().GetSize();
 		int x_dims[kMaxTensorDim + 1], y_dims[kMaxTensorDim + 1];
-		x_dims[0] = x[0]->GetBatchSize();
-		x_dims[1] = x[0]->GetShape().GetSize();
-		y_dims[0] = x[0]->GetBatchSize();
-		y_dims[1] = 1;
+		int dims;
+		ReduceSumDesc desc;
+		if (axis_ == -1) {
+			dims = 2;
+			x_dims[0] = x[0]->GetBatchSize();
+			x_dims[1] = x[0]->GetShape().GetSize();
+			y_dims[0] = x[0]->GetBatchSize();
+			y_dims[1] = 1;
+			desc.y_strides[0] = 1;
+			desc.y_strides[1] = 0;
+		}
+		else {
+			dims = y->GetShape().GetRank() + 1;
+			GetTensorDims(x[0], x_dims);
+			GetTensorDims(y, y_dims);
+			GetTensorStrides(y, desc.y_strides);
+		}
 		int regular_total, reduce_total;
 		int regular_sizes[kMaxTensorDim + 1], reduce_sizes[kMaxTensorDim + 1];
 		int strides[kMaxTensorDim + 1];
-		GetReduceDims(2, x_dims, y_dims, &regular_total, &reduce_total,
+		GetReduceDims(dims, x_dims, y_dims, &regular_total, &reduce_total,
 			regular_sizes, reduce_sizes, strides);
+
+		memcpy(desc.x_strides, strides, sizeof(strides));
 
 		auto transform_func = [=] __device__ (int index, Empty) {
 			return x_data[index];
 		};
 		auto store_func = [=] __device__ (int index, float value, Empty) {
-			y_data[index / size] = value;
+			int y_index = GetTensorStorageIndex(index, dims, desc.x_strides, desc.y_strides);
+			y_data[y_index] = value;
 		};
-		TransformReduce(transform_func, cub::Sum(), store_func, 2,
+		TransformReduce(transform_func, cub::Sum(), store_func, dims,
 			regular_total, regular_sizes, reduce_total, reduce_sizes, strides, Empty());
 	}
 
@@ -724,17 +744,23 @@ public:
 		int batch_size = x[0]->GetBatchSize();
 		int nelems = size * batch_size;
 
+		if (axis_ != -1)
+			REPORT_ERROR("Unsupported.");
+
 		int threadsPerBlock = kThreadsPerBlock;
 		int blocksPerGrid = (nelems + threadsPerBlock - 1) / threadsPerBlock;
 		ReduceSumBackwardKernel<<<blocksPerGrid, threadsPerBlock>>>(
 			nelems, size, dEdY_data, dEdX_data);
 	}
+
+private:
+	int axis_;
 };
 
 template<typename Dummy>
 struct ReduceSumNodeFactory<Dummy, GPU> {
-	Node *Create(int node) {
-		return new ReduceSumNodeGPU(node);
+	Node *Create(int node, int axis) {
+		return new ReduceSumNodeGPU(node, axis);
 	}
 };
 
