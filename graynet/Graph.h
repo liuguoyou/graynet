@@ -60,11 +60,20 @@ public:
 	/*! Clear accumulated parameter gradients */
 	void ClearParameterGradients();
 
+	/*! Clear paramaters. */
+	void ClearParameters();
+
 	/*! Checks whether the gradient of given expression w.r.t. all parameters is correct.
 	 * This is done by comparing gradient with numerical differentiation.
 	 * \param loss The loss expression to check gradient against. Must be a scalar expression.
 	 */
 	bool CheckGradient(const Expression &loss, bool verbose = false);
+
+	/*! Save graph to `file_name`. */
+	void Save(const char* file_name) const;
+
+	/*! Load graph from `file_name`. */
+	int Load(const char* file_name);
 
 	/*! \private */
 	Expression AddNode(Node *node, const Shape &output_shape, bool sparse_output = false, int batch_size = -1);
