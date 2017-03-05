@@ -29,14 +29,14 @@ public:
 	inline int GetDim(int dim) const { return dims_[dim]; }
 
 	inline bool operator==(const Shape &rhs) const {
-		for (int i = 0; i < kMaxTensorDim; i++)
+		for (int i = 0; i < ndim_; i++)
 			if (dims_[i] != rhs.dims_[i])
 				return false;
 		return true;
 	}
 
 	inline bool operator!=(const Shape &rhs) const {
-		for (int i = 0; i < kMaxTensorDim; i++)
+		for (int i = 0; i < ndim_; i++)
 			if (dims_[i] == rhs.dims_[i])
 				return false;
 		return true;
