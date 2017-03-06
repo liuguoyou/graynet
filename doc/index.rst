@@ -16,6 +16,13 @@ A complete reference of all GrayNet's functionalities is shown below:
    operations
    optimizers
 
+Documentation on internal designs:
+
+.. toctree::
+   :maxdepth: 2
+
+   serialization
+
 Indices and tables
 ==================
 

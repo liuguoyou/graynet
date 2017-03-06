@@ -1,8 +1,7 @@
-Serialization
-==========
+Serialization format
+====================
 
-Graph Class:
------------------
+```
 1. 4 bytes, "GRAY", file format header;
 2. 1 int32, version number;
 3. 1 int32, count, the number of paramaters;
@@ -18,4 +17,4 @@ Graph Class:
 			b. `ndim_` int32, store `dims_` array.
 		C. 1 int32, data type, 0 is float, 1 is double;
 		D. data_ array. length is shape.GetSize(). tensor data type may be float or double.
-
+```
