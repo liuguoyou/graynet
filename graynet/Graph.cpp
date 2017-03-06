@@ -450,7 +450,8 @@ void Graph::Backward(const Expression &expression) {
 }
 
 void Graph::OptimizerUpdate(Optimizer *optimizer) {
-	optimizer->UpdateCallback(d->parameters_, d->parameter_gradients_);
+	optimizer->UpdateCallback((int)d->parameters_.size(),
+		d->parameters_.data(), d->parameter_gradients_.data());
 	Clear();
 	ClearParameterGradients();
 }

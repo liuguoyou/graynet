@@ -4,6 +4,7 @@
 
 #include <cblas.h>
 #include <cmath>
+#include <vector>
 #ifdef USE_CUDA
 #include <cublas_v2.h>
 #include <host_defines.h>
@@ -114,11 +115,10 @@ int Optimizer::GetExtraDataCount() const {
 	return 0;
 }
 
-void Optimizer::UpdateCallback(const std::vector<Tensor> &parameters,
-	const std::vector<Tensor> &gradients) {
+void Optimizer::UpdateCallback(int count, Tensor *parameters, Tensor *gradients) {
 	int extras_count = GetExtraDataCount();
 	if (extras_count > 0) {
-		for (size_t i = d->extras_.size(); i < parameters.size(); i++) {
+		for (int i = (int)d->extras_.size(); i < count; i++) {
 			int batch_size = parameters[i].GetBatchSize();
 			const Shape &shape = parameters[i].GetShape();
 			int size = extras_count * batch_size * shape.GetSize() * sizeof(float);
@@ -129,7 +129,7 @@ void Optimizer::UpdateCallback(const std::vector<Tensor> &parameters,
 			d->extras_.emplace_back(device->GetDeviceType(), batch_size, shape, data);
 		}
 	}
-	UpdateCallback(parameters, gradients, d->extras_);
+	UpdateCallback(count, parameters, gradients, d->extras_.data());
 }
 
 SGDOptimizer::SGDOptimizer(Graph *graph, float learning_rate)
@@ -140,11 +140,10 @@ void SGDOptimizer::UpdateLearningRate(float learning_rate) {
 	learning_rate_ = learning_rate;
 }
 
-void SGDOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
-	const std::vector<Tensor> &gradients,
-	const std::vector<Tensor> &extras) const {
+void SGDOptimizer::UpdateCallback(int count,
+	Tensor *parameters, Tensor *gradients, Tensor *extras) const {
 	// x -= lr * dEdX
-	for (int parameter_id = 0; parameter_id < (int)parameters.size(); parameter_id++) {
+	for (int parameter_id = 0; parameter_id < count; parameter_id++) {
 		int size = parameters[parameter_id].GetShape().GetSize();
 		float *parameter_data = parameters[parameter_id].GetData();
 		float *gradient_data = gradients[parameter_id].GetData();
@@ -176,11 +175,9 @@ struct AdaGradUpdateParam {
 	}
 };
 
-void AdaGradOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
-	const std::vector<Tensor> &gradients,
-	const std::vector<Tensor> &extras) const {
-
-	for (int parameter_id = 0; parameter_id < (int)parameters.size(); parameter_id++) {
+void AdaGradOptimizer::UpdateCallback(int count,
+	Tensor *parameters, Tensor *gradients, Tensor *extras) const {
+	for (int parameter_id = 0; parameter_id < count; parameter_id++) {
 		int size = parameters[parameter_id].GetShape().GetSize();
 		float *parameter_data = parameters[parameter_id].GetData();
 		float *gradient_data = gradients[parameter_id].GetData();
@@ -208,11 +205,9 @@ struct RmsPropUpdateG {
 	}
 };
 
-void RmsPropOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
-	const std::vector<Tensor> &gradients,
-	const std::vector<Tensor> &extras) const {
-
-	for (int parameter_id = 0; parameter_id < (int)parameters.size(); parameter_id++) {
+void RmsPropOptimizer::UpdateCallback(int count,
+	Tensor *parameters, Tensor *gradients, Tensor *extras) const {
+	for (int parameter_id = 0; parameter_id < count; parameter_id++) {
 		int size = parameters[parameter_id].GetShape().GetSize();
 		float *parameter_data = parameters[parameter_id].GetData();
 		float *gradient_data = gradients[parameter_id].GetData();
@@ -261,13 +256,11 @@ int AdamOptimizer::GetExtraDataCount() const {
 	return 2;
 }
 
-void AdamOptimizer::UpdateCallback(const std::vector<Tensor> &parameters,
-	const std::vector<Tensor> &gradients,
-	const std::vector<Tensor> &extras) const {
-
+void AdamOptimizer::UpdateCallback(int count,
+	Tensor *parameters, Tensor *gradients, Tensor *extras) const {
 	beta1_t_ *= beta1_;
 	beta2_t_ *= beta2_;
-	for (int parameter_id = 0; parameter_id < (int)parameters.size(); parameter_id++) {
+	for (int parameter_id = 0; parameter_id < count; parameter_id++) {
 		int size = parameters[parameter_id].GetShape().GetSize();
 		float *parameter_data = parameters[parameter_id].GetData();
 		float *gradient_data = gradients[parameter_id].GetData();

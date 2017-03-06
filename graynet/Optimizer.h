@@ -1,8 +1,5 @@
 #pragma once
 
-// TODO: Avoid include the vector header since this is public header
-#include <vector>
-
 class Graph;
 class Tensor;
 class OptimizerPrivate;
@@ -27,13 +24,11 @@ protected:
 	virtual int GetExtraDataCount() const;
 
 	/*! Update parameters */
-	virtual void UpdateCallback(const std::vector<Tensor> &parameters,
-		const std::vector<Tensor> &gradients,
-		const std::vector<Tensor> &extras) const = 0;
+	virtual void UpdateCallback(int count,
+		Tensor *parameters, Tensor *gradients, Tensor *extras) const = 0;
 
 	/*! Update parameters, callback for Graph */
-	void UpdateCallback(const std::vector<Tensor> &parameters,
-		const std::vector<Tensor> &gradients);
+	void UpdateCallback(int count, Tensor *parameters, Tensor *gradients);
 	friend class Graph;
 
 private:
@@ -62,9 +57,8 @@ public:
 	void UpdateLearningRate(float learning_rate);
 
 protected:
-	virtual void UpdateCallback(const std::vector<Tensor> &parameters,
-		const std::vector<Tensor> &gradients,
-		const std::vector<Tensor> &extras) const override;
+	virtual void UpdateCallback(int count,
+		Tensor *parameters, Tensor *gradients, Tensor *extras) const override;
 
 private:
 	float learning_rate_;
@@ -88,9 +82,8 @@ public:
 
 protected:
 	virtual int GetExtraDataCount() const override;
-	virtual void UpdateCallback(const std::vector<Tensor> &parameters,
-		const std::vector<Tensor> &gradients,
-		const std::vector<Tensor> &extras) const override;
+	virtual void UpdateCallback(int count,
+		Tensor *parameters, Tensor *gradients, Tensor *extras) const override;
 
 private:
 	float initial_learning_rate_;
@@ -118,9 +111,8 @@ public:
 
 protected:
 	virtual int GetExtraDataCount() const override;
-	virtual void UpdateCallback(const std::vector<Tensor> &parameters,
-		const std::vector<Tensor> &gradients,
-		const std::vector<Tensor> &extras) const override;
+	virtual void UpdateCallback(int count,
+		Tensor *parameters, Tensor *gradients, Tensor *extras) const override;
 
 private:
 	float initial_learning_rate_;
@@ -157,9 +149,8 @@ public:
 
 protected:
 	virtual int GetExtraDataCount() const override;
-	virtual void UpdateCallback(const std::vector<Tensor> &parameters,
-		const std::vector<Tensor> &gradients,
-		const std::vector<Tensor> &extras) const override;
+	virtual void UpdateCallback(int count,
+		Tensor *parameters, Tensor *gradients, Tensor *extras) const override;
 
 private:
 	float initial_learning_rate_;
