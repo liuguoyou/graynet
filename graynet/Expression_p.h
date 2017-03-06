@@ -122,7 +122,7 @@ struct SliceNodeFactory {
 
 template<typename Dummy, DeviceType DeviceType>
 struct ConcatNodeFactory {
-	Node *Create(std::initializer_list<Expression> values, int axis);
+	Node *Create(initializer_view<Expression> values, int axis);
 };
 
 template<typename Dummy, DeviceType DeviceType>

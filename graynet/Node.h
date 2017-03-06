@@ -2,11 +2,12 @@
 
 /*! This is an internal header file */
 
-#include <initializer_list>
 #include <vector>
 #include "Expression.h"
 #include "Graph.h"
 #include "Tensor.h"
+
+#include "initializer_view.h"
 
 /*! \private */
 class Node {
@@ -24,7 +25,7 @@ public:
 	Node(std::initializer_list<int> args) : args_(args) {}
 
 	/*! Constructor */
-	Node(std::initializer_list<Expression> args) {
+	Node(initializer_view<Expression> args) {
 		for (const Expression &expression : args)
 			args_.push_back(expression.GetNodeIndex());
 	}

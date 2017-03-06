@@ -1566,7 +1566,7 @@ Expression Slice(const Expression &x, const Shape &start, const Shape &size) {
 
 class ConcatNodeCPU : public Node {
 public:
-	ConcatNodeCPU(std::initializer_list<Expression> values, int axis) : Node(values), axis_(axis) {}
+	ConcatNodeCPU(initializer_view<Expression> values, int axis) : Node(values), axis_(axis) {}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		const Shape &y_shape = y->GetShape();
@@ -1617,12 +1617,12 @@ private:
 
 template<typename Dummy>
 struct ConcatNodeFactory<Dummy, CPU> {
-	Node *Create(std::initializer_list<Expression> values, int axis) {
+	Node *Create(initializer_view<Expression> values, int axis) {
 		return new ConcatNodeCPU(values, axis);
 	}
 };
 
-Expression Concat(std::initializer_list<Expression> values, int axis) {
+Expression Concat(initializer_view<Expression> values, int axis) {
 	if (values.size() == 0 || values.size() == 1)
 		REPORT_ERROR("Must have at least two values for concatenation.");
 	Graph *graph = values.begin()->GetGraph();

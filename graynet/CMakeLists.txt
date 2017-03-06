@@ -18,6 +18,7 @@ set(SRCS
 	Tensor.cpp
 	Utils.h
 	Utils.cpp
+	initializer_view.h
 	graynet.h
 )
 

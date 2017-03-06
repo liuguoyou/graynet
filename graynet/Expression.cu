@@ -835,7 +835,7 @@ template struct SliceNodeFactory<void, GPU>;
 
 class ConcatNodeGPU : public Node {
 public:
-	ConcatNodeGPU(std::initializer_list<Expression> values, int axis) : Node(values), axis_(axis) {}
+	ConcatNodeGPU(initializer_view<Expression> values, int axis) : Node(values), axis_(axis) {}
 
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
 		REPORT_ERROR("Concat() is unsupported on GPU.");
@@ -852,7 +852,7 @@ private:
 
 template<typename Dummy>
 struct ConcatNodeFactory<Dummy, GPU> {
-	Node *Create(std::initializer_list<Expression> values, int axis) {
+	Node *Create(initializer_view<Expression> values, int axis) {
 		return new ConcatNodeGPU(values, axis);
 	}
 };

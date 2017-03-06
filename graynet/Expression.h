@@ -2,7 +2,7 @@
 
 #include "Tensor.h"
 
-#include <initializer_list>
+#include "initializer_view.h"
 
 /*! @file */
 
@@ -273,9 +273,9 @@ Expression ReLU(const Expression &x);
  *
  * * If an operand has rank 2, it is treated as a regular matrix.
  * * If an operand has rank > 2, it is treated as a stack of matrices.
- * * If left hand operand is a vector, an implicit dimension of size 1 is appended to
+ * * If left hand operand is a vector, an implicit dimension of size 1 is prepended to
  * its shape. In other words, it is treated as a row vector in matrix multiplication.
- * * If right hand operand is a vector, an implicit dimension of size 1 is prepended to
+ * * If right hand operand is a vector, an implicit dimension of size 1 is appended to
  * its shape. In other words, it is treated as a column vector in matrix multiplication.
  *
  * The operation is currently unsupported when both operands are stacks of matrices.
@@ -340,7 +340,7 @@ Expression Slice(const Expression &x, const Shape &start, const Shape &size);
  *
  * Currently only non batched inputs are supported.
  */
-Expression Concat(std::initializer_list<Expression> values, int axis);
+Expression Concat(initializer_view<Expression> values, int axis);
 
 /*! Dropout operation. This will randomly zero out \f$ p \f$ fraction of input elements.
  * The remaining values will be scaled by \f$ 1 / (1 - p) \f$.
