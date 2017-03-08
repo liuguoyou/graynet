@@ -65,14 +65,14 @@ static std::vector<DataPoint> LoadMNIST(const char *image_filename, const char *
 }
 
 static Expression Model(Expression t, bool is_train) {
-#if 1
+#if 0
 	t = ReLU(LinearLayer("l1", t, 128));
 	t = ReLU(LinearLayer("l2", t, 64));
 #else
 	t = Reshape(t, Shape(1, kHeight, kWidth));
 	t = ReLU(ConvolutionLayer("conv1", t, 32, Shape(3, 3), Shape(1, 1), Shape(0, 0)));
-	t = ReLU(ConvolutionLayer("conv2", t, 16, Shape(3, 3), Shape(1, 1), Shape(0, 0)));
-	t = MaxPooling(t, Shape(3, 3), Shape(1, 1), Shape(0, 0));
+	t = ReLU(ConvolutionLayer("conv2", t, 32, Shape(3, 3), Shape(1, 1), Shape(0, 0)));
+	t = MaxPooling(t, Shape(2, 2), Shape(1, 1), Shape(0, 0));
 	t = Flatten(t);
 	t = ReLU(LinearLayer("l1", t, 128));
 #endif
@@ -106,7 +106,7 @@ int main() {
 	//RmsPropOptimizer optimizer(&graph);
 	AdamOptimizer optimizer(&graph);
 
-	int batch_size = 20;
+	int batch_size = 120;
 	float loss = 0, accuracy = 0;
 
 	std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
