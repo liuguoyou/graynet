@@ -52,23 +52,23 @@ static __global__ void TransformReduceKernel(TransformFunc transform_func, Store
 	}
 }
 
-template<typename TransformFunc, typename ReduceFunc, typename StoreFunc, typename ExtraData>
+template<int ndims, typename TransformFunc, typename ReduceFunc, typename StoreFunc, typename ExtraData>
 static __global__ void TransformReduceKernel(TransformFunc transform_func, ReduceFunc reduce_func, StoreFunc store_func,
-	int dims, int regular_total, int reduce_total, ReduceDesc reduce_desc, int reduces_per_thread, ExtraData extra_data) {
+	int regular_total, int reduce_total, ReduceDesc reduce_desc, int reduces_per_thread, ExtraData extra_data) {
 	typedef cub::BlockReduce<float, kMaxThreadsPerBlock> BlockReduceT;
 	__shared__ typename BlockReduceT::TempStorage temp_storage;
 
 	int regular_idx = blockIdx.x;
 	int reduce_idx_base = threadIdx.x;
-	int base_idx = GetTensorStorageIndex(regular_idx, dims, reduce_desc.regular_sizes, reduce_desc.strides);
+	int base_idx = GetTensorStorageIndex(regular_idx, ndims, reduce_desc.regular_sizes, reduce_desc.strides);
 	// First element
-	int index = base_idx + GetTensorStorageIndex(reduce_idx_base, dims, reduce_desc.reduce_sizes, reduce_desc.strides);
+	int index = base_idx + GetTensorStorageIndex(reduce_idx_base, ndims, reduce_desc.reduce_sizes, reduce_desc.strides);
 	float value = transform_func(index, extra_data);
 	int reduce_idx = reduce_idx_base;
 	for (int i = 1; i < reduces_per_thread; i++) {
 		reduce_idx += blockDim.x;
 		if (reduce_idx < reduce_total) {
-			int index = base_idx + GetTensorStorageIndex(reduce_idx, dims, reduce_desc.reduce_sizes, reduce_desc.strides);
+			int index = base_idx + GetTensorStorageIndex(reduce_idx, ndims, reduce_desc.reduce_sizes, reduce_desc.strides);
 			float cur_value = transform_func(index, extra_data);
 			// Reduce element
 			value = reduce_func(value, cur_value);
@@ -137,9 +137,36 @@ static void TransformReduce(TransformFunc transform_func, ReduceFunc reduce_func
 			threadsPerBlock = reduce_total;
 		else
 			threadsPerBlock = kMaxThreadsPerBlock;
-
-		TransformReduceKernel<<<blocksPerGrid, threadsPerBlock>>>(transform_func, reduce_func, store_func,
-			dims, regular_total, reduce_total, desc, reduces_per_thread, extra_data);
+		
+		switch (dims) {
+		case 1: TransformReduceKernel<1><<<blocksPerGrid, threadsPerBlock>>>(
+			transform_func, reduce_func, store_func,
+			regular_total, reduce_total, desc, reduces_per_thread, extra_data); break;
+		case 2: TransformReduceKernel<2><<<blocksPerGrid, threadsPerBlock>>>(
+			transform_func, reduce_func, store_func,
+			regular_total, reduce_total, desc, reduces_per_thread, extra_data); break;
+		case 3: TransformReduceKernel<3><<<blocksPerGrid, threadsPerBlock>>>(
+			transform_func, reduce_func, store_func,
+			regular_total, reduce_total, desc, reduces_per_thread, extra_data); break;
+		case 4: TransformReduceKernel<4><<<blocksPerGrid, threadsPerBlock>>>(
+			transform_func, reduce_func, store_func,
+			regular_total, reduce_total, desc, reduces_per_thread, extra_data); break;
+		case 5: TransformReduceKernel<5><<<blocksPerGrid, threadsPerBlock>>>(
+			transform_func, reduce_func, store_func,
+			regular_total, reduce_total, desc, reduces_per_thread, extra_data); break;
+		case 6: TransformReduceKernel<6><<<blocksPerGrid, threadsPerBlock>>>(
+			transform_func, reduce_func, store_func,
+			regular_total, reduce_total, desc, reduces_per_thread, extra_data); break;
+		case 7: TransformReduceKernel<7><<<blocksPerGrid, threadsPerBlock>>>(
+			transform_func, reduce_func, store_func,
+			regular_total, reduce_total, desc, reduces_per_thread, extra_data); break;
+		case 8: TransformReduceKernel<8><<<blocksPerGrid, threadsPerBlock>>>(
+			transform_func, reduce_func, store_func,
+			regular_total, reduce_total, desc, reduces_per_thread, extra_data); break;
+		default:
+			static_assert(8 == kMaxTensorDim + 1, "");
+			DEBUG_BREAK();
+		}
 	}
 }
 
@@ -225,15 +252,46 @@ struct BinaryForwardDims {
 	int lhs_strides[kMaxTensorDim + 1], rhs_strides[kMaxTensorDim + 1];
 };
 
-template<typename ForwardFunc>
+template<typename ForwardFunc, int ndims>
 static __global__ void BinaryForwardKernel(const float *lhs, const float *rhs, float *y,
-	int nelems, int ndims, BinaryForwardDims forward) {
+	int nelems, BinaryForwardDims forward) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
 	if (i < nelems) {
 		int lhs_index = GetTensorStorageIndex(i, ndims, forward.elems, forward.lhs_strides);
 		int rhs_index = GetTensorStorageIndex(i, ndims, forward.elems, forward.rhs_strides);
 		y[i] = ForwardFunc()(lhs[lhs_index], rhs[rhs_index]);
 	}
+}
+
+template<typename ForwardFunc>
+static void BinaryForwardKernelWrapper(const float *lhs, const float *rhs, float *y,
+	int nelems, int ndims, BinaryForwardDims forward) {
+
+	int threadsPerBlock = kThreadsPerBlock;
+	int blocksPerGrid = (nelems + threadsPerBlock - 1) / threadsPerBlock;
+
+	switch (ndims) {
+	case 1:	BinaryForwardKernel<ForwardFunc, 1><<<blocksPerGrid, threadsPerBlock>>>(
+		lhs, rhs, y, nelems, forward); break;
+	case 2:	BinaryForwardKernel<ForwardFunc, 2><<<blocksPerGrid, threadsPerBlock>>>(
+		lhs, rhs, y, nelems, forward); break;
+	case 3:	BinaryForwardKernel<ForwardFunc, 3><<<blocksPerGrid, threadsPerBlock>>>(
+		lhs, rhs, y, nelems, forward); break;
+	case 4:	BinaryForwardKernel<ForwardFunc, 4><<<blocksPerGrid, threadsPerBlock>>>(
+		lhs, rhs, y, nelems, forward); break;
+	case 5:	BinaryForwardKernel<ForwardFunc, 5><<<blocksPerGrid, threadsPerBlock>>>(
+		lhs, rhs, y, nelems, forward); break;
+	case 6:	BinaryForwardKernel<ForwardFunc, 6><<<blocksPerGrid, threadsPerBlock>>>(
+		lhs, rhs, y, nelems, forward); break;
+	case 7:	BinaryForwardKernel<ForwardFunc, 7><<<blocksPerGrid, threadsPerBlock>>>(
+		lhs, rhs, y, nelems, forward); break;
+	case 8:	BinaryForwardKernel<ForwardFunc, 8><<<blocksPerGrid, threadsPerBlock>>>(
+		lhs, rhs, y, nelems, forward); break;
+	default:
+		static_assert(8 == kMaxTensorDim + 1, "");
+		DEBUG_BREAK();
+	}
+	CUDA_CALL(cudaGetLastError());
 }
 
 struct BinaryReduceDesc {
@@ -262,11 +320,8 @@ public:
 		GetTensorStrides(x[0], forward.lhs_strides);
 		GetTensorStrides(x[1], forward.rhs_strides);
 
-		int threadsPerBlock = kThreadsPerBlock;
-		int blocksPerGrid = (nelems + threadsPerBlock - 1) / threadsPerBlock;
-		BinaryForwardKernel<ForwardFunc><<<blocksPerGrid, threadsPerBlock>>>(
+		BinaryForwardKernelWrapper<ForwardFunc>(
 			lhs_data, rhs_data, y_data, nelems, ndims, forward);
-		CUDA_CALL(cudaGetLastError());
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
