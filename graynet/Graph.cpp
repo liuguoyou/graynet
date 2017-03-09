@@ -543,6 +543,7 @@ int Graph::Load(const char* file_name) {
 	fread(&version, sizeof(int), 1, in_file);
 	if (strcmp(file_header, kFileHeader) != 0 || version != kVersion) {
 		REPORT_ERROR("Graph file header not match or version not match.");
+		fclose(in_file);
 		return 0;
 	}
 
@@ -581,6 +582,7 @@ int Graph::Load(const char* file_name) {
 		float *parameter_data = new float[size];
 		if (is_sparse) {
 			REPORT_ERROR("Graph serialization only support dense tensor currently.");
+			fclose(in_file);
 			return 0;
 		}
 		else
