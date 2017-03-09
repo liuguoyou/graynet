@@ -888,21 +888,103 @@ struct SliceNodeFactory<Dummy, GPU> {
 
 template struct SliceNodeFactory<void, GPU>;
 
+static __global__ void ConcatForwardKernel(int N, float **axis_bases,
+	int *higher_strides, float *y, int higher_stride, int axis_stride) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < N) {
+		int h = i / higher_stride;
+		int j = i % higher_stride;
+		int t = j / axis_stride;
+		int l = j % axis_stride;
+		y[i] = axis_bases[t][h * higher_strides[t] + l];
+	}
+}
+
+static __global__ void ConcatBackwardKernel(int N, float **axis_bases,
+	int *higher_strides, float *dEdY, int higher_stride, int axis_stride) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < N) {
+		int h = i / higher_stride;
+		int j = i % higher_stride;
+		int t = j / axis_stride;
+		int l = j % axis_stride;
+		axis_bases[t][h * higher_strides[t] + l] += dEdY[i];
+	}
+}
+
 class ConcatNodeGPU : public Node {
 public:
 	ConcatNodeGPU(initializer_view<Expression> values, int axis) : Node(values), axis_(axis) {}
 
+	virtual void FreeMemory(Device *device) override {
+		if (axis_bases_)
+			device->FreeMemoryPinned(axis_bases_);
+		if (axis_bases_backward_)
+			device->FreeMemoryPinned(axis_bases_backward_);
+		if (higher_strides_)
+			device->FreeMemoryPinned(higher_strides_);
+	}
+
 	virtual void Forward(Graph *graph, const std::vector<const Tensor *> &x, Tensor *y) const override {
-		REPORT_ERROR("Concat() is unsupported on GPU.");
+		const Shape &y_shape = y->GetShape();
+		int N = y_shape.GetSize();
+		int axis_stride = y_shape.GetSizeRange(axis_ + 1, y_shape.GetRank());
+		int axis_total = y_shape.GetDim(axis_);
+		int higher_stride = axis_stride * axis_total;
+		int higher_size = y_shape.GetSizeRange(0, axis_);
+		axis_bases_ = (float**)graph->GetDevice()->AllocateMemoryPinned(sizeof(float*) * axis_total);
+		higher_strides_ = (int*)graph->GetDevice()->AllocateMemoryPinned(sizeof(int) * axis_total);
+		int k = 0;
+		for (size_t i = 0; i < x.size(); i++) {
+			int cur_axis_total = x[i]->GetShape().GetDim(axis_);
+			float *cur_data_base = x[i]->GetData();
+			for (int j = 0; j < cur_axis_total; j++) {
+				axis_bases_[k] = cur_data_base;
+				higher_strides_[k] = cur_axis_total * axis_stride;
+				cur_data_base += axis_stride;
+				k++;
+			}
+		}
+
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+		ConcatForwardKernel<<<blocksPerGrid, threadsPerBlock>>>(N, axis_bases_, higher_strides_,
+			y->GetData(), higher_stride, axis_stride);
+		CUDA_CALL(cudaDeviceSynchronize());
+		CUDA_CALL(cudaGetLastError());
 	}
 
 	virtual void Backward(Graph *graph, const std::vector<const Tensor *> &x, const Tensor *y,
 		const Tensor *dEdY, const std::vector<Tensor *> &dEdX) const override {
-		REPORT_ERROR("Concat() is unsupported on GPU.");
+		const Shape &y_shape = y->GetShape();
+		int N = y_shape.GetSize();
+		int axis_stride = y_shape.GetSizeRange(axis_ + 1, y_shape.GetRank());
+		int axis_total = y_shape.GetDim(axis_);
+		int higher_stride = axis_stride * axis_total;
+		int higher_size = y_shape.GetSizeRange(0, axis_);
+		axis_bases_backward_ = (float**)graph->GetDevice()->AllocateMemoryPinned(sizeof(float*) * axis_total);
+		int k = 0;
+		for (size_t i = 0; i < x.size(); i++) {
+			int cur_axis_total = x[i]->GetShape().GetDim(axis_);
+			float *cur_data_base = dEdX[i]->GetData();
+			for (int j = 0; j < cur_axis_total; j++) {
+				axis_bases_backward_[k] = cur_data_base;
+				cur_data_base += axis_stride;
+				k++;
+			}
+		}
+		
+		int threadsPerBlock = kThreadsPerBlock;
+		int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+		ConcatBackwardKernel<<<blocksPerGrid, threadsPerBlock>>>(N, axis_bases_backward_, higher_strides_,
+			dEdY->GetData(), higher_stride, axis_stride);
+		CUDA_CALL(cudaGetLastError());
 	}
 
 private:
 	int axis_;
+	mutable float **axis_bases_ = nullptr, **axis_bases_backward_ = nullptr;
+	mutable int *higher_strides_ = nullptr;
 };
 
 template<typename Dummy>
