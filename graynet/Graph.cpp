@@ -238,16 +238,6 @@ void Graph::ClearParameterGradients() {
 		d->device_->ZeroMemory(parameter_gradient.GetData(), parameter_gradient.GetShape().GetSize() * sizeof(float));
 }
 
-void Graph::ClearParameters() {
-	d->parameter_names_.clear();
-	for (size_t i = 0; i < d->parameters_.size(); i++) {
-		FreeTensorMemory(this, d->parameters_[i]);
-		FreeTensorMemory(this, d->parameter_gradients_[i]);
-	}
-	d->parameters_.clear();
-	d->parameter_gradients_.clear();
-}
-
 void Graph::ClearForwardCache() {
 	for (int i = 0; i < (int)d->nodes_.size(); i++) {
 		int batch_size = d->outputs_[i].GetBatchSize();
@@ -477,122 +467,127 @@ int Graph::GetNodeBatchSize(int index) const {
 		return 1;
 }
 
-const static char* kFileHeader = "GRAY";
-const static int kVersion = 0;
+// See doc/serialization.rst for detailed serialization format.
+static const int kSerializationVersion = 1;
 
 void Graph::Save(const char* file_name) const {
-	FILE* out_file = fopen(file_name, "wb");
-	// store file header and version number
-	fwrite(kFileHeader, sizeof(char), std::string(kFileHeader).size(), out_file);
-	fwrite(&kVersion, sizeof(int), 1, out_file);
+	FILE *out_file = fopen(file_name, "wb");
+	if (out_file == nullptr)
+		REPORT_ERROR("Open output file failed.");
 
-	// store number of paramaters
-	int param_num = (int)d->parameter_names_.size();
-	fwrite(&param_num, sizeof(int), 1, out_file);
+	// Magic and version number
+	int magic = 'YARG';
+	fwrite(&magic, 4, 1, out_file);
+	fwrite(&kSerializationVersion, 4, 1, out_file);
 
-	std::vector<std::string> param_names(d->parameter_names_.size());
-	for (const std::pair<const std::string, int>& pr : d->parameter_names_)
-		param_names[-pr.second - 1] = pr.first;
-	
-	// store paramater names
-	for (const std::string& name : param_names) {
-		int length = (int)name.size();
-		fwrite(&length, sizeof(int), 1, out_file);
-		fwrite(name.data(), sizeof(char), name.size(), out_file);
-	}
+	// Number of parameters
+	int parameter_count = (int)d->parameter_names_.size();
+	fwrite(&parameter_count, 4, 1, out_file);
 
-	// store paramaters (tensors)
-	for (const Tensor& tensor : d->parameters_) {
-		char is_sparse = tensor.IsSparse() ? (char)1 : (char)0;
-		fwrite(&is_sparse, sizeof(char), 1, out_file);
-		int ndim = tensor.GetShape().GetRank();
-		fwrite(&ndim, sizeof(int), 1, out_file);
-		fwrite(tensor.GetShape().data(), sizeof(int), ndim, out_file);
-
-		// write tensor data type, currently it only can be float. 0 is float, 1 is double.
-		int data_type = 0;
-		fwrite(&data_type, sizeof(int), 1, out_file);
-
-		int size = tensor.GetShape().GetSize();
-		if (is_sparse)
-			REPORT_ERROR("Graph serialization only support dense tensor currently.");
-		else {
-#ifdef USE_CUDA
-			if (GetDeviceType() == GPU) {
-				float *buffer = new float[size];
-				CUDA_CALL(cudaMemcpy(buffer, tensor.GetData(), size * sizeof(float), cudaMemcpyDeviceToHost));
-				fwrite(buffer, sizeof(float), size, out_file);
-				delete[] buffer;
-			}
-			else
-#endif
-			fwrite(tensor.GetData(), sizeof(float), size, out_file);
+	for (const std::pair<std::string, int> &p : d->parameter_names_) {
+		const Tensor &tensor = d->parameters_[PARAMETER_INDEX(p.second)];
+		// Parameter name
+		int length = (int)p.first.size();
+		fwrite(&length, 4, 1, out_file);
+		fwrite(p.first.data(), 1, length, out_file);
+		// Shape
+		if (tensor.GetBatchSize() != 1)
+			DEBUG_BREAK();
+		const Shape &shape = tensor.GetShape();
+		int rank = shape.GetRank();
+		fwrite(&rank, 4, 1, out_file);
+		for (int i = 0; i < rank; i++) {
+			int dim = shape.GetDim(i);
+			fwrite(&dim, 4, 1, out_file);
 		}
+		// Data type
+		int data_type = 0; // float
+		fwrite(&data_type, 4, 1, out_file);
+		// Storage type
+		if (tensor.IsSparse())
+			DEBUG_BREAK();
+		int storage_type = 0; // Dense
+		fwrite(&storage_type, 4, 1, out_file);
+		// Actual data
+		int size = shape.GetSize();
+		float *buffer = new float[size];
+		tensor.GetValue(buffer);
+		fwrite(buffer, 4, size, out_file);
+		delete[] buffer;
 	}
-	
 	fclose(out_file);
 }
 
-int Graph::Load(const char* file_name) {
-	FILE* in_file = fopen(file_name, "rb");
+void Graph::Load(const char *file_name) {
+	FILE *in_file = fopen(file_name, "rb");
+	if (in_file == nullptr)
+		REPORT_ERROR("Open input file failed.");
 
-	char file_header[5] = { '\0' };
+	// Magic
+	int magic;
+	fread(&magic, 4, 1, in_file);
+	if (magic != 'YARG')
+		REPORT_ERROR("File magic mismatch.");
+	// Version
 	int version;
-	// load file header and version number
-	fread(file_header, sizeof(char), std::string(kFileHeader).size(), in_file);
-	fread(&version, sizeof(int), 1, in_file);
-	if (strcmp(file_header, kFileHeader) != 0 || version != kVersion) {
-		REPORT_ERROR("Graph file header not match or version not match.");
-		fclose(in_file);
-		return 0;
+	fread(&version, 4, 1, in_file);
+	if (version != kSerializationVersion)
+		REPORT_ERROR("Unsupported serialization version: %d", version);
+
+	// Number of parameters
+	int parameter_count;
+	fread(&parameter_count, 4, 1, in_file);
+	if (parameter_count < 0)
+		REPORT_ERROR("Invalid parameter count: %d", parameter_count);
+
+	// Clear existing parameters
+	d->parameter_names_.clear();
+	for (size_t i = 0; i < d->parameters_.size(); i++) {
+		FreeTensorMemory(this, d->parameters_[i]);
+		FreeTensorMemory(this, d->parameter_gradients_[i]);
 	}
+	d->parameters_.clear();
+	d->parameter_gradients_.clear();
 
-	ClearParameters();
-
-	// load number of paramaters
-	int param_num = -1;
-	fread(&param_num, sizeof(int), 1, in_file);
-
-	// load paramater names
-	std::vector<std::string> param_names(param_num);
-	for (int i = 0; i < param_num; ++i) {
-		int length = -1;
-		fread(&length, sizeof(int), 1, in_file);
-		param_names[i].resize(length, '\0');
-		fread(&param_names[i][0], sizeof(char), length, in_file);
-	}
-
-	// load paramaters (tensors)
-	for (int i = 0; i < param_num; ++i) {
-		char is_sparse = (char)-1;
-		fread(&is_sparse, sizeof(char), 1, in_file);
-		int ndim = -1;
-		fread(&ndim, sizeof(int), 1, in_file);
-		std::vector<int> dims(ndim);
-		fread(&dims[0], sizeof(int), ndim, in_file);
+	for (int i = 0; i < parameter_count; i++) {
+		// Parameter name
+		std::string name;
+		int length;
+		fread(&length, 4, 1, in_file);
+		if (length <= 0)
+			REPORT_ERROR("Invalid parameter name length: %d", length);
+		name.resize(length);
+		fread(&name[0], 1, length, in_file);
+		// Shape
 		Shape shape;
-		for (int d = 0; d < ndim; ++d)
-			shape.PushDim(dims[d]);
-
-		// load tensor data type, currently it only can be float. 0 is float, 1 is double.
-		int data_type = 0;
-		fread(&data_type, sizeof(int), 1, in_file);
-
-		int size = shape.GetSize();
-		float *parameter_data = new float[size];
-		if (is_sparse) {
-			REPORT_ERROR("Graph serialization only support dense tensor currently.");
-			fclose(in_file);
-			return 0;
+		int rank;
+		fread(&rank, 4, 1, in_file);
+		if (rank <= 0 || rank > kMaxTensorDim)
+			REPORT_ERROR("Invalid rank: %d", rank);
+		for (int i = 0; i < rank; i++) {
+			int dim;
+			fread(&dim, 4, 1, in_file);
+			if (dim < 1)
+				REPORT_ERROR("Invalid dimension %d: %d", i, dim);
+			shape.PushDim(dim);
 		}
-		else
-			fread(parameter_data, sizeof(float), size, in_file);
-		
-		Expression param = AddParameter(shape, parameter_data);
-		delete[] parameter_data;
-		d->parameter_names_.emplace(param_names[i], param.GetNodeIndex());
+		// Data type
+		int data_type;
+		fread(&data_type, 4, 1, in_file);
+		if (data_type != 0) // Float
+			REPORT_ERROR("Unknown data type: %d", data_type);
+		// Storage type
+		int storage_type;
+		fread(&storage_type, 4, 1, in_file);
+		if (storage_type != 0) // dense
+			REPORT_ERROR("Unknown storage type: %d", storage_type);
+		// Data
+		int size = shape.GetSize();
+		float *data = new float[size];
+		fread(data, 4, size, in_file);
+		Expression parameter = AddParameter(shape, data);
+		d->parameter_names_.emplace(name, parameter.GetNodeIndex());
+		delete[] data;
 	}
-
 	fclose(in_file);
-	return 1;
 }
