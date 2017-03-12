@@ -101,9 +101,9 @@ Expression BatchInput(Graph *graph, int batch_size, const Shape &shape, const fl
  * \param shape The shape of the data vector. Must be of rank 1.
  * \param nonzero_count The total number of nonzero values in the input.
  * \param sparse_data Float array holding nonzero values. The length of this array
- * must be equal to `batch_size + 1`.
- * \param batch_indices Start and end position of each batch. The length of this array
  * must be equal to `nonzero_count`.
+ * \param batch_indices Start and end position of each batch. The length of this array
+ * must be equal to `batch_size + 1`.
  * \param indices Data vector index of each nonzero value. The length of this array
  * must be equal to `nonzero_count`.
  */

@@ -11,16 +11,15 @@ public:
 		EXPECT_TRUE(graph.CheckGradient(loss, true));
 	}
 
-	void CheckValue(const Expression &value, const float *expected) {
-		const float kAbsErrorAllowance = 1e-4f;
+	void CheckValue(const Expression &value, const float *expected, double abs_error_allowance = 1e-4f) {
 		Tensor result = value.Forward();
 		int size = result.GetBatchSize() * result.GetShape().GetSize();
 		float *actual = new float[size];
 		result.GetValue(actual);
 		for (int i = 0; i < size; i++) {
-			EXPECT_NEAR(actual[i], expected[i], kAbsErrorAllowance) << "Index is " << i;
+			EXPECT_NEAR(actual[i], expected[i], abs_error_allowance) << "Index is " << i;
 		}
-		delete actual;
+		delete[] actual;
 	}
 
 	float *GenerateTestData(const Shape &shape) {
@@ -151,6 +150,21 @@ TEST_F(NodeTest, CrossEntropy) {
 	CheckGradient(x);
 }
 
+TEST_F(NodeTest, ClassificationAccuracy) {
+	const float predict_prob[] = { 
+		0.1f, 0.3f, 0.6f, 
+		0.2f, 0.5f, 0.3f, 
+		0.8f, 0.1f, 0.1f, 
+		0.3f, 0.3f, 0.4f,
+	};
+	const int label_data[] = { 1, 1, 0, 2 };
+	const int data_size = 4;
+	Expression x = BatchInput(&graph, data_size, Shape(3), predict_prob);
+	x = ClassificationAccuracy(x, data_size, label_data);
+	const float expected[] = { 0.f, 1.f, 1.f, 1.f };
+	CheckValue(x, expected);
+}
+
 TEST_F(NodeTest, Softmax) {
 	const float logit[] = { 3.5f, 2.1f, 2.5f, -4.6f, 7.0f, 6.3f };
 	const int label = 4;
@@ -261,11 +275,193 @@ TEST_F(NodeTest, BroadcastAdd) {
 	CheckGradient(z2);
 }
 
-TEST_F(NodeTest, Sigmoid) {
-	const float x_data[] = { -10.f, -5.f, -1.f, 0.f, 1.f, 5.f, 10.f };
-	Expression x = graph.AddParameter(Shape(7), x_data);
-	x = Sigmoid(x);
-	const float expected[] = { 0.9999545f, 0.9933071f, 0.7310586f, 0.5f, 0.2689414f, 0.00669285f, 4.53978687e-5f };
+TEST_F(NodeTest, Square) {
+	const float x_data[] = { -3.14f, -1.23f, 0.f, 1.f, 1.23f, 3.14f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Square(x);
+	const float expected[] = { 9.85960e+00f, 1.51290e+00f, 0.00000e+00f,
+		1.00000e+00f, 1.51290e+00f, 9.85960e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Cube) {
+	const float x_data[] = { -1.54f, -1.23f, 0.f, 1.f, 1.23f, 1.54f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Cube(x);
+	const float expected[] = { -3.65226e+00f, -1.86087e+00f, 0.00000e+00f, 
+		1.00000e+00f, 1.86087e+00f, 3.65226e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Exp) {
+	const float x_data[] = { -1.54f, -1.23f, 0.f, 1.f, 1.23f, 1.54f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Exp(x);
+	const float expected[] = { 2.14381e-01f, 2.92293e-01f, 1.00000e+00f, 
+		2.71828e+00f, 3.42123e+00f, 4.66459e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Log) {
+	const float x_data[] = { 0.9f, 1.f, 1.23f, 1.54f , 2.14f, 3.0f};
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Log(x);
+	const float expected[] = { -1.05361e-01f, 0.00000e+00f, 2.07014e-01f, 
+		4.31782e-01f, 7.60806e-01f, 1.09861e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Abs) {
+	const float x_data[] = { -1.54f, -1.23f, 1.f, 1.23f, 1.54f };
+	Expression x = graph.AddParameter(Shape(5), x_data);
+	x = Abs(x);
+	const float expected[] = { 1.54f, 1.23f, 1.f, 1.23f, 1.54f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Sqrt) {
+	const float x_data[] = { 0.9f, 1.f, 1.23f, 1.54f , 2.14f, 3.0f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Sqrt(x);
+	const float expected[] = { 9.48683e-01f, 1.00000e+00f, 1.10905e+00f, 
+		1.24097e+00f, 1.46287e+00f, 1.73205e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Cbrt) {
+	const float x_data[] = { -0.9f, 1.f, 1.23f, 1.54f , 2.14f, 3.0f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Cbrt(x);
+	const float expected[] = { -9.65489e-01f, 1.00000e+00f, 1.07144e+00f, 
+		1.15480e+00f, 1.28866e+00f, 1.44225e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Sin) {
+	const float x_data[] = { -14.0f, -1.23f, 0.f, 1.f, 1.23f, 1.54f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Sin(x);
+	const float expected[] = { -9.90607e-01f, -9.42489e-01f, 0.00000e+00f, 
+		8.41471e-01f, 9.42489e-01f, 9.99526e-01f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Cos) {
+	const float x_data[] = { -154.0f, -1.23f, 0.f, 1.f, 1.23f, 1.54f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Cos(x);
+	const float expected[] = { -9.98081e-01f, 3.34238e-01f, 1.00000e+00f, 
+		5.40302e-01f, 3.34238e-01f, 3.07915e-02f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Tan) {
+	const float x_data[] = { -1.25f, -1.23f, 0.f, 1.f, 1.23f, 1.27f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Tan(x);
+	const float expected[] = { -3.00957e+00f, -2.81982e+00f, 0.00000e+00f, 
+		1.55741e+00f, 2.81982e+00f, 3.22363e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Asin) {
+	const float x_data[] = { -0.9f, -0.23f, 0.0f, 0.1f, 0.53f, 0.9f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Asin(x);
+	const float expected[] = { -1.11977e+00f, -2.32078e-01f, 0.00000e+00f, 
+		1.00167e-01f, 5.58601e-01f, 1.11977e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Acos) {
+	const float x_data[] = { -0.9f, -0.23f, 0.0f, 0.1f, 0.53f, 0.9f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Acos(x);
+	const float expected[] = { 2.69057e+00f, 1.80287e+00f, 1.57080e+00f, 
+		1.47063e+00f, 1.01220e+00f, 4.51027e-01f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Atan) {
+	const float x_data[] = { -154.0f, -1.23f, 0.f, 1.f, 1.23f, 1.34f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Atan(x);
+	const float expected[] = { -1.56430e+00f, -8.88174e-01f, 0.00000e+00f, 
+		7.85398e-01f, 8.88174e-01f, 9.29688e-01f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Sinh) {
+	const float x_data[] = { -1.2f, -1.0f, 0.f, 1.f, 1.23f, 1.34f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Sinh(x);
+	const float expected[] = { -1.50946e+00f, -1.17520e+00f, 0.00000e+00f, 
+		1.17520e+00f, 1.56447e+00f, 1.77860e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Cosh) {
+	const float x_data[] = { -1.2f, -1.0f, 0.f, 1.f, 1.23f, 1.34f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Cosh(x);
+	const float expected[] = { 1.81066e+00f, 1.54308e+00f, 1.00000e+00f, 
+		1.54308e+00f, 1.85676e+00f, 2.04044e+00f };
 	CheckValue(x, expected);
 	x = Softmax(x);
 	const int label = 0;
@@ -277,6 +473,74 @@ TEST_F(NodeTest, Tanh) {
 	const float x_data[] = { -10.f, -5.f, -1.f, 0.f, 1.f, 5.f, 10.f };
 	Expression x = graph.AddParameter(Shape(7), x_data);
 	x = Tanh(x);
+	const float expected[] = { -1.00000e+00f, -9.99909e-01f, -7.61594e-01f, 
+		0.00000e+00f, 7.61594e-01f, 9.99909e-01f, 1.00000e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Asinh) {
+	const float x_data[] = { -1.50946e+00f, -1.17520e+00f, 0.00000e+00f,
+		1.17520e+00f, 1.56447e+00f, 1.77860e+00f  };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Asinh(x);
+	const float expected[] = { -1.2f, -1.0f, 0.f, 1.f, 1.23f, 1.34f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Acosh) {
+	const float x_data[] = { 1.54308e+00f, 1.64308e+00f, 1.81066e+00f, 
+		1.85676e+00f, 2.04044e+00f, 3.04044e+00f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = Acosh(x);
+	const float expected[] = { 9.99999e-01f, 1.08072e+00f, 1.20000e+00f, 
+		1.23000e+00f, 1.34000e+00f, 1.77694e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Atanh) {
+	const float x_data[] = { -0.9f, -0.8f, -0.7f, 0.0f, 0.7f, 0.8f, 0.9f };
+	Expression x = graph.AddParameter(Shape(7), x_data);
+	x = Atanh(x);
+	const float expected[] = { -1.47222e+00f, -1.09861e+00f, -8.67301e-01f, 
+		0.00000e+00f, 8.67301e-01f, 1.09861e+00f, 1.47222e+00f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, Sigmoid) {
+	const float x_data[] = { -10.f, -5.f, -1.f, 0.f, 1.f, 5.f, 10.f };
+	Expression x = graph.AddParameter(Shape(7), x_data);
+	x = Sigmoid(x);
+	const float expected[] = { 4.53979e-05f, 6.69285e-03f, 2.68941e-01f, 5.00000e-01f, 
+		7.31059e-01f, 9.93307e-01f, 9.99955e-01f };
+	CheckValue(x, expected);
+	x = Softmax(x);
+	const int label = 0;
+	x = CrossEntropy(x, 1, &label);
+	CheckGradient(x);
+}
+
+TEST_F(NodeTest, ReLU) {
+	const float x_data[] = { -0.9f, -0.8f, -0.7f, 0.7f, 0.8f, 0.9f };
+	Expression x = graph.AddParameter(Shape(6), x_data);
+	x = ReLU(x);
+	const float expected[] = { 0.f, 0.f, 0.f, 0.7f, 0.8f, 0.9f };
+	CheckValue(x, expected);
 	x = Softmax(x);
 	const int label = 0;
 	x = CrossEntropy(x, 1, &label);
@@ -323,6 +587,7 @@ TEST_F(NodeTest, ReduceSumBatched1D) {
 }
 
 TEST_F(NodeTest, ReduceSumLarge) {
+	const double kAbsTolerance = 1e-3;
 	int count = 1025;
 	float *x_data = GenerateTestData(Shape(count));
 	float sum = 0;
@@ -331,7 +596,7 @@ TEST_F(NodeTest, ReduceSumLarge) {
 	Expression x = Input(&graph, Shape(count), x_data);
 	delete x_data;
 	x = ReduceSum(x);
-	CheckValue(x, &sum);
+	CheckValue(x, &sum, kAbsTolerance);
 	CheckGradient(x);
 }
 
